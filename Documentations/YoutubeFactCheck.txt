@@ -1,0 +1,17 @@
+### Stack :
+
+→ React JS 
+
+→ Tailwindcss (pas de fichier css)
+
+### But du projet
+
+Créer un site web pour fact-checker des vidéos YouTube (ex. : discours politiques) en transcrivant le contenu, extrayant les affirmations, vérifiant leur véracité et attribuant un indice de confiance.
+
+### V1 :
+
+- **Interface** : Formulaire web (React) pour soumettre une URL YouTube.
+- **Transcription** : YouTube Data API ou Whisper pour transcrire la vidéo.
+- **Extraction des faits** :  LLM (ex. : Llama) pour lister les affirmations.
+- **Vérification** : Google Fact Check Explorer, PolitiFact, Snopes pour vérifier les faits avec sources fiables.
+- **Indice de confiance** : Score par affirmation (ex. : Vrai = 90 %, Faux = 10 %) et moyenne globale affichée.
