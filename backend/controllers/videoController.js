@@ -1,25 +1,21 @@
 const videoService = require('../services/videoService');
 
-async function factCheck(req, res) {
-  console.log(`factCheck: Requête reçue pour l'URL ${req.body.youtube_url}`);
-  const { youtube_url } = req.body;
+async function createAnalysis(req, res) {
+  const { youtubeUrl, transcriptionProvider } = req.body;
+  console.log(`Requête reçue pour créer une analyse pour l'URL: ${youtubeUrl}`);
 
-  if (!youtube_url) {
-    return res.status(400).json({ error: 'YouTube URL is required' });
+  if (!youtubeUrl || !transcriptionProvider) {
+    return res.status(400).json({ error: 'youtubeUrl and transcriptionProvider are required' });
   }
 
   try {
-    let video = await videoService.getVideo(youtube_url);
-
-    if (!video) {
-      video = await videoService.createVideo(youtube_url);
-    }
-
-    res.json({ video });
+    const analysisResult = await videoService.startAnalysis(youtubeUrl, transcriptionProvider);
+    res.status(201).json(analysisResult); // 201 Created est plus approprié
   } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ error: 'Failed to process fact-check' });
+    console.error('Error in createAnalysis controller:', error.message);
+    // Renvoyer un message d'erreur plus utile au frontend
+    res.status(500).json({ error: error.message || 'Failed to start analysis process' });
   }
 }
 
-module.exports = { factCheck };
+module.exports = { createAnalysis };

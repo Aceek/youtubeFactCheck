@@ -3,6 +3,6 @@ const videoController = require('../controllers/videoController');
 
 const router = express.Router();
 
-router.post('/fact-check', videoController.factCheck);
+router.post('/analyses', videoController.createAnalysis);
 
 module.exports = router;
