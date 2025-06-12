@@ -1,3 +1,6 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,10 +10,77 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Modèle pour la vidéo YouTube elle-même
 model Video {
+  id         String    @id @unique // Utiliser l'ID YouTube est plus pertinent
+  youtubeUrl String    @unique
+  title      String?   // On pourra récupérer ces infos plus tard
+  author     String?
+  analyses   Analysis[]
+  createdAt  DateTime  @default(now())
+}
+
+// Modèle pour une analyse de fact-checking complète
+model Analysis {
+  id              Int      @id @default(autoincrement())
+  video           Video    @relation(fields: [videoId], references: [id])
+  videoId         String
+  status          Status   @default(PENDING) // Pour suivre l'état de l'analyse (PENDING, TRANSCRIBING, EXTRACTING_CLAIMS, COMPLETE, FAILED)
+  confidenceScore Float?   // Score de confiance global de la vidéo pour cette analyse
+  transcription   Transcription?
+  claims          Claim[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// Modèle pour la transcription
+model Transcription {
+  id                Int      @id @default(autoincrement())
+  analysis          Analysis @relation(fields: [analysisId], references: [id])
+  analysisId        Int      @unique
+  provider          String   // 'YOUTUBE' ou 'ASSEMBLY_AI', etc.
+  content           Json     // Stocker le transcript structuré [{text, offset, duration}] est bien mieux qu'un gros bloc de texte.
+  fullText          String? @db.Text // Garder une version texte brut pour un accès facile
+  createdAt         DateTime @default(now())
+}
+
+// Modèle pour une affirmation ("fact") extraite
+model Claim {
+  id              Int      @id @default(autoincrement())
+  analysis        Analysis @relation(fields: [analysisId], references: [id])
+  analysisId      Int
+  text            String   @db.Text
+  timestamp       Float    // Le moment où l'affirmation est faite dans la vidéo (en secondes)
+  verdict         Verdict? // VRAI, FAUX, TROMPEUR, INVERIFIABLE
+  confidenceScore Float?   // Score de confiance pour cette affirmation spécifique
+  explanation     String?  @db.Text
+  sources         Source[]
+  createdAt       DateTime @default(now())
+}
+
+// Modèle pour une source de vérification
+model Source {
   id          Int      @id @default(autoincrement())
-  youtubeUrl  String   @unique
-  transcript  String?
+  claim       Claim    @relation(fields: [claimId], references: [id])
+  claimId     Int
+  url         String
+  title       String?
   createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+}
+
+// Enums pour standardiser les valeurs
+enum Status {
+  PENDING
+  TRANSCRIBING
+  EXTRACTING_CLAIMS
+  COMPLETE
+  FAILED
+}
+
+enum Verdict {
+  TRUE
+  FALSE
+  PARTIALLY_TRUE
+  MISLEADING
+  UNVERIFIABLE
 }
