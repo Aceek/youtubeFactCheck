@@ -1,6 +1,5 @@
 const { PrismaClient } = require('@prisma/client');
 const { YoutubeTranscript } = require('youtube-transcript');
-
 const prisma = new PrismaClient();
 
 // Fonction utilitaire pour extraire l'ID de la vidéo, c'est plus robuste.
@@ -86,60 +85,51 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
 
 /**
  * Récupère et formate la transcription depuis YouTube de manière robuste.
- * Tente de récupérer la transcription dans plusieurs langues avant d'échouer.
+ * Tente séquentiellement plusieurs stratégies et retourne le premier succès.
  * @param {string} videoId - L'ID de la vidéo YouTube.
  * @returns {Promise<{structured: Array, fullText: string}>}
  */
 async function getYouTubeTranscript(videoId) {
-  const languagesToTry = ['fr', 'en'];
-  let transcript;
-  let lastError = null;
 
-  for (const lang of languagesToTry) {
-    try {
-      console.log(`Tentative de récupération de la transcription en '${lang}'...`);
-      transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang });
-      if (transcript && transcript.length > 0) {
-        console.log(`Transcription trouvée avec succès en '${lang}' !`);
-        lastError = null; // Réinitialiser l'erreur si on a réussi
-        break;
-      }
-    } catch (error) {
-      lastError = error; // Garder la dernière erreur
-      console.log(`Pas de transcription trouvée en '${lang}'.`);
+    // On définit nos stratégies dans l'ordre de priorité.
+    // `null` représentera la tentative par défaut (sans langue spécifiée).
+    const strategies = [
+        { lang: 'fr', label: 'Français' },
+        { lang: 'en', label: 'Anglais' },
+        { lang: null, label: 'Défaut' } 
+    ];
+
+    for (const strategy of strategies) {
+        try {
+            console.log(`--- Tentative avec la stratégie : ${strategy.label} ---`);
+            
+            // On passe les options à la librairie. Si lang est null, l'objet sera vide.
+            const options = strategy.lang ? { lang: strategy.lang } : {};
+            const transcript = await YoutubeTranscript.fetchTranscript(videoId, options);
+
+            // C'est la condition la plus importante : on vérifie si on a un résultat non-vide.
+            if (transcript && transcript.length > 0) {
+                console.log(`✅ SUCCÈS ! Transcription trouvée avec la stratégie : ${strategy.label}`);
+                return {
+                    structured: transcript,
+                    fullText: transcript.map(item => item.text).join(' '),
+                };
+            } else {
+                // Cas de la "réussite silencieuse" : pas d'erreur, mais pas de données.
+                console.log(`⚠️ La tentative "${strategy.label}" a réussi mais n'a retourné aucune donnée. On continue...`);
+            }
+
+        } catch (error) {
+            // Cas de la "vraie erreur" : la librairie a levé une exception.
+            console.warn(`❌ La tentative "${strategy.label}" a échoué avec une erreur : ${error.message}`);
+        }
     }
-  }
 
-  // Tentative finale sans spécifier de langue
-  if (!transcript || transcript.length === 0) {
-    try {
-      console.log("Tentative de récupération avec les paramètres par défaut...");
-      transcript = await YoutubeTranscript.fetchTranscript(videoId);
-      if (transcript && transcript.length > 0) {
-          lastError = null;
-          console.log("Transcription trouvée avec les paramètres par défaut.");
-      }
-    } catch (error) {
-        lastError = error;
-    }
-  }
-
-  // Si on n'a toujours rien, on analyse la dernière erreur pour donner un meilleur feedback
-  if (!transcript || transcript.length === 0) {
-    if (lastError && lastError.message.includes('subtitles are disabled')) {
-        throw new Error('Les sous-titres sont désactivés pour cette vidéo.');
-    }
-    // C'est ici que nous gérons le cas le plus probable
-    throw new Error(
-      "Aucune transcription n'a pu être récupérée. Cela peut arriver si les sous-titres n'existent pas ou si YouTube a temporairement limité l'accès depuis notre serveur."
-    );
-  }
-
-  return {
-    structured: transcript,
-    fullText: transcript.map(item => item.text).join(' '),
-  };
+    // Si la boucle se termine sans qu'aucune stratégie n'ait retourné de résultat,
+    // cela signifie qu'elles ont toutes échoué (soit par erreur, soit en retournant un résultat vide).
+    // On peut alors jeter une erreur finale et définitive.
+    console.error("Échec final : Aucune stratégie n'a permis de récupérer une transcription valide.");
+    throw new Error("Après toutes les tentatives, aucune transcription exploitable n'a pu être trouvée pour cette vidéo.");
 }
-
 
 module.exports = { startAnalysis };
