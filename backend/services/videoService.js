@@ -85,20 +85,61 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
 }
 
 /**
- * Récupère et formate la transcription depuis YouTube.
+ * Récupère et formate la transcription depuis YouTube de manière robuste.
+ * Tente de récupérer la transcription dans plusieurs langues avant d'échouer.
  * @param {string} videoId - L'ID de la vidéo YouTube.
  * @returns {Promise<{structured: Array, fullText: string}>}
  */
 async function getYouTubeTranscript(videoId) {
-  const transcript = await YoutubeTranscript.fetchTranscript(videoId);
+  const languagesToTry = ['fr', 'en'];
+  let transcript;
+  let lastError = null;
+
+  for (const lang of languagesToTry) {
+    try {
+      console.log(`Tentative de récupération de la transcription en '${lang}'...`);
+      transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang });
+      if (transcript && transcript.length > 0) {
+        console.log(`Transcription trouvée avec succès en '${lang}' !`);
+        lastError = null; // Réinitialiser l'erreur si on a réussi
+        break;
+      }
+    } catch (error) {
+      lastError = error; // Garder la dernière erreur
+      console.log(`Pas de transcription trouvée en '${lang}'.`);
+    }
+  }
+
+  // Tentative finale sans spécifier de langue
   if (!transcript || transcript.length === 0) {
-    throw new Error('No transcript found for this video on YouTube.');
+    try {
+      console.log("Tentative de récupération avec les paramètres par défaut...");
+      transcript = await YoutubeTranscript.fetchTranscript(videoId);
+      if (transcript && transcript.length > 0) {
+          lastError = null;
+          console.log("Transcription trouvée avec les paramètres par défaut.");
+      }
+    } catch (error) {
+        lastError = error;
+    }
+  }
+
+  // Si on n'a toujours rien, on analyse la dernière erreur pour donner un meilleur feedback
+  if (!transcript || transcript.length === 0) {
+    if (lastError && lastError.message.includes('subtitles are disabled')) {
+        throw new Error('Les sous-titres sont désactivés pour cette vidéo.');
+    }
+    // C'est ici que nous gérons le cas le plus probable
+    throw new Error(
+      "Aucune transcription n'a pu être récupérée. Cela peut arriver si les sous-titres n'existent pas ou si YouTube a temporairement limité l'accès depuis notre serveur."
+    );
   }
 
   return {
-    structured: transcript, // Le format original [{ text, offset, duration }]
+    structured: transcript,
     fullText: transcript.map(item => item.text).join(' '),
   };
 }
+
 
 module.exports = { startAnalysis };
