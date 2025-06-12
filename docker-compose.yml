@@ -1,0 +1,61 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    env_file:
+      - ./frontend/.env
+    command: npm run dev
+    depends_on:
+      - backend
+    networks:
+      - fact-check-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    env_file:
+      - ./backend/.env
+    command: npm run dev
+    depends_on:
+      - postgresdb
+    networks:
+      - fact-check-network
+
+  postgresdb:
+    image: postgres:16
+    restart: unless-stopped
+    secrets:
+      - postgres_password
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password
+      - POSTGRES_DB=factcheckdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - fact-check-network
+
+secrets:
+  postgres_password:
+    file: ./postgres_password.txt
+
+volumes:
+  postgres-data:
+
+networks:
+  fact-check-network:
+    driver: bridge

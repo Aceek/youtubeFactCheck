@@ -1,0 +1,21 @@
+# Environment variables
+frontend/.env
+backend/.env
+.env
+.env.local
+.env.development
+.env.production
+.env/
+postgres_password.txt
+
+# Node modules
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+
+# Docker volumes
+postgres-data/
+
+# Logs and temp files
+*.log
+.DS_Store
