@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
-const videoController = require('./controllers/videoController');
-const videoRoutes = require('./routes/videoRoutes');
+const videoController = require('./src/controllers/videoController');
+const videoRoutes = require('./src/routes/videoRoutes');
 
 const app = express();
 
