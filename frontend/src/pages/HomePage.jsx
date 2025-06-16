@@ -1,44 +1,27 @@
-import { useState } from 'react';
 import AnalysisForm from '../components/analysis/AnalysisForm';
 import AnalysisResult from '../components/analysis/AnalysisResult';
-import { createAnalysis } from '../api/analysisApi';
+import { useAnalysis } from '../hooks/useAnalysis'; // NOUVEAU
 
 function HomePage() {
-  const [analysis, setAnalysis] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  const handleStartAnalysis = async (url, provider) => {
-    setIsLoading(true);
-    setError(null);
-    setAnalysis(null);
-
-    try {
-      const result = await createAnalysis(url, provider);
-      setAnalysis(result);
-    } catch (err) {
-      setError(err.message || "Une erreur inconnue est survenue.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const { analysis, isLoading, error, startAnalysis } = useAnalysis();
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="max-w-3xl mx-auto space-y-8">
       <AnalysisForm 
-        onSubmit={handleStartAnalysis} 
+        onSubmit={startAnalysis} // On passe directement la fonction du hook
         isLoading={isLoading} 
       />
+
       {error && (
-        <div className="mt-8 p-4 bg-red-900/50 border border-red-700 rounded-lg text-red-300">
-          <p className="font-bold">Erreur :</p>
+        <div className="p-4 bg-red-900/50 border border-red-700 rounded-lg text-red-300 animate-fade-in" role="alert">
+          <p className="font-bold">Échec de l'analyse :</p>
           <p>{error}</p>
         </div>
       )}
+
+      {/* Le résultat ne s'affiche que si une analyse est terminée et disponible */}
       {analysis && (
-        <div className="mt-8">
-          <AnalysisResult analysis={analysis} />
-        </div>
+        <AnalysisResult analysis={analysis} />
       )}
     </div>
   );

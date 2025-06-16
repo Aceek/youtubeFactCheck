@@ -1,135 +1,154 @@
 const { PrismaClient } = require('@prisma/client');
-const { YoutubeTranscript } = require('youtube-transcript');
+const axios = require('axios');
+const { spawn } = require('child_process');
+
 const prisma = new PrismaClient();
 
-// Fonction utilitaire pour extraire l'ID de la vidéo, c'est plus robuste.
+const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
+const API_ENDPOINT = 'https://api.assemblyai.com/v2';
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 function extractVideoId(url) {
   const regex = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
   const match = url.match(regex);
   return match ? match[1] : null;
 }
 
-/**
- * Lance le processus d'analyse d'une vidéo.
- * Si la vidéo n'existe pas, elle est créée.
- * Crée une nouvelle entrée Analysis et lance la transcription.
- * @param {string} youtubeUrl - L'URL de la vidéo YouTube.
- * @param {string} transcriptionProvider - 'YOUTUBE' ou 'AI'.
- * @returns {Promise<Object>} L'objet Analysis créé.
- */
-async function startAnalysis(youtubeUrl, transcriptionProvider) {
-  console.log(`Début de l'analyse pour l'URL: ${youtubeUrl} avec le fournisseur: ${transcriptionProvider}`);
-  
-  const videoId = extractVideoId(youtubeUrl);
-  if (!videoId) {
-    throw new Error('Invalid YouTube URL');
+async function getTranscriptFromAssemblyAI(youtubeUrl) {
+  if (!ASSEMBLYAI_API_KEY) {
+    throw new Error("Clé d'API AssemblyAI (ASSEMBLYAI_API_KEY) non configurée.");
   }
 
-  // 1. Trouver ou créer la vidéo parente
+  return new Promise((resolve, reject) => {
+    console.log(`1/3 - Lancement de yt-dlp pour l'URL: ${youtubeUrl}`);
+    const ytDlpProcess = spawn('yt-dlp', ['-f', 'bestaudio', '-x', '--audio-format', 'mp3', '-o', '-', youtubeUrl]);
+
+    let stderr = '';
+    ytDlpProcess.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    ytDlpProcess.on('close', (code) => {
+      if (code !== 0) {
+        console.error(`yt-dlp a quitté avec le code ${code}. Erreur: ${stderr}`);
+        reject(new Error("Le téléchargement de l'audio depuis YouTube a échoué."));
+      }
+    });
+
+    console.log('2/3 - Upload du flux audio vers AssemblyAI...');
+    axios.post(`${API_ENDPOINT}/upload`, ytDlpProcess.stdout, {
+      headers: { 'authorization': ASSEMBLYAI_API_KEY, 'Transfer-Encoding': 'chunked' }
+    })
+    .then(uploadResponse => {
+      const { upload_url } = uploadResponse.data;
+      console.log(`Upload réussi. URL temporaire de l'audio : ${upload_url}`);
+      
+      console.log('3/3 - Soumission de l\'audio pour transcription...');
+      return axios.post(`${API_ENDPOINT}/transcript`, {
+        audio_url: upload_url,
+        language_detection: true,
+      }, {
+        headers: { 'authorization': ASSEMBLYAI_API_KEY }
+      });
+    })
+    .then(async submitResponse => {
+      const { id: transcriptId } = submitResponse.data;
+
+      while (true) {
+        console.log(`Vérification du statut (ID: ${transcriptId})...`);
+        await sleep(5000);
+        const getResponse = await axios.get(`${API_ENDPOINT}/transcript/${transcriptId}`, {
+          headers: { 'authorization': ASSEMBLYAI_API_KEY }
+        });
+
+        const { status, error } = getResponse.data;
+        if (status === 'completed') {
+          console.log("✅ Transcription terminée !");
+        
+          resolve({
+            fullText: getResponse.data.text,
+            structured: getResponse.data.words,
+          });
+          return;
+        } else if (status === 'failed') {
+          reject(new Error(`Le service de transcription a échoué. Raison: ${error}`));
+          return;
+        }
+      }
+    })
+    .catch(err => {
+      console.error("Erreur dans le processus de transcription AssemblyAI:", err.message);
+      reject(new Error("Échec de la communication avec le service de transcription."));
+    });
+  });
+}
+
+
+async function getAnalysisById(id) {
+  return prisma.analysis.findUnique({
+    where: { id },
+    include: { transcription: true },
+  });
+}
+
+async function startAnalysis(youtubeUrl, transcriptionProvider) {
+  console.log(`Début de l'analyse pour l'URL: ${youtubeUrl}`);
+  const videoId = extractVideoId(youtubeUrl);
+  if (!videoId) throw new Error('URL YouTube invalide.');
+
+  const existingAnalysis = await prisma.analysis.findFirst({
+    where: { videoId: videoId, status: 'COMPLETE' },
+    include: { transcription: true },
+  });
+  if (existingAnalysis) {
+      console.log(`Cache HIT: Analyse complète trouvée (ID: ${existingAnalysis.id}). Renvoi du résultat existant.`);
+      return existingAnalysis;
+  }
+  
+  console.log(`Cache MISS: Lancement d'un nouveau processus.`);
+
   const video = await prisma.video.upsert({
     where: { id: videoId },
     update: {},
     create: { id: videoId, youtubeUrl },
   });
 
-  // 2. Créer une nouvelle entrée d'analyse en état PENDING
   const analysis = await prisma.analysis.create({
     data: {
       videoId: video.id,
-      status: 'TRANSCRIBING', // On passe directement à la transcription
+      status: 'PENDING',
     },
+
   });
+  
+  runTranscriptionProcess(analysis.id, youtubeUrl, transcriptionProvider);
 
-  // 3. Effectuer la transcription en fonction du choix
+  return analysis;
+}
+
+async function runTranscriptionProcess(analysisId, youtubeUrl, provider) {
   try {
-    let transcriptData;
-    if (transcriptionProvider === 'YOUTUBE') {
-      transcriptData = await getYouTubeTranscript(videoId);
-    } else if (transcriptionProvider === 'AI') {
-      // Logique pour AssemblyAI ou autre à implémenter ici
-      console.warn("La transcription par IA n'est pas encore implémentée.");
-      throw new Error("AI transcription is not available yet.");
-    } else {
-      throw new Error("Invalid transcription provider.");
-    }
-
-    // 4. Sauvegarder la transcription et mettre à jour l'analyse
+    await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'TRANSCRIBING' } });
+    
+    const transcriptData = await getTranscriptFromAssemblyAI(youtubeUrl);
+    
     await prisma.transcription.create({
       data: {
-        analysisId: analysis.id,
-        provider: transcriptionProvider,
-        content: transcriptData.structured, // JSON structuré
-        fullText: transcriptData.fullText, // Texte brut
+        analysisId: analysisId,
+        provider: provider,
+        content: transcriptData.structured,
+        fullText: transcriptData.fullText,
       },
     });
 
-    const updatedAnalysis = await prisma.analysis.update({
-      where: { id: analysis.id },
-      data: { status: 'EXTRACTING_CLAIMS' }, // Prochaine étape logique
-      include: { transcription: true } // Renvoyer la transcription avec l'analyse
-    });
-    
-    console.log(`Transcription réussie pour l'analyse ${analysis.id}`);
-    return updatedAnalysis;
+    await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'COMPLETE' } });
+    console.log(`Processus terminé pour l'analyse ${analysisId}.`);
 
   } catch (error) {
-    // En cas d'échec, marquer l'analyse comme FAILED
-    await prisma.analysis.update({
-      where: { id: analysis.id },
-      data: { status: 'FAILED' },
-    });
-    console.error(`Échec de la transcription pour l'analyse ${analysis.id}:`, error);
-    throw error; // Renvoyer l'erreur au contrôleur
+    console.error(`Échec du processus pour l'analyse ${analysisId}:`, error.message);
+    await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'FAILED' } });
   }
 }
 
-/**
- * Récupère et formate la transcription depuis YouTube de manière robuste.
- * Tente séquentiellement plusieurs stratégies et retourne le premier succès.
- * @param {string} videoId - L'ID de la vidéo YouTube.
- * @returns {Promise<{structured: Array, fullText: string}>}
- */
-async function getYouTubeTranscript(videoId) {
-
-    // On définit nos stratégies dans l'ordre de priorité.
-    // `null` représentera la tentative par défaut (sans langue spécifiée).
-    const strategies = [
-        { lang: 'fr', label: 'Français' },
-        { lang: 'en', label: 'Anglais' },
-        { lang: null, label: 'Défaut' } 
-    ];
-
-    for (const strategy of strategies) {
-        try {
-            console.log(`--- Tentative avec la stratégie : ${strategy.label} ---`);
-            
-            // On passe les options à la librairie. Si lang est null, l'objet sera vide.
-            const options = strategy.lang ? { lang: strategy.lang } : {};
-            const transcript = await YoutubeTranscript.fetchTranscript(videoId, options);
-
-            // C'est la condition la plus importante : on vérifie si on a un résultat non-vide.
-            if (transcript && transcript.length > 0) {
-                console.log(`✅ SUCCÈS ! Transcription trouvée avec la stratégie : ${strategy.label}`);
-                return {
-                    structured: transcript,
-                    fullText: transcript.map(item => item.text).join(' '),
-                };
-            } else {
-                // Cas de la "réussite silencieuse" : pas d'erreur, mais pas de données.
-                console.log(`⚠️ La tentative "${strategy.label}" a réussi mais n'a retourné aucune donnée. On continue...`);
-            }
-
-        } catch (error) {
-            // Cas de la "vraie erreur" : la librairie a levé une exception.
-            console.warn(`❌ La tentative "${strategy.label}" a échoué avec une erreur : ${error.message}`);
-        }
-    }
-
-    // Si la boucle se termine sans qu'aucune stratégie n'ait retourné de résultat,
-    // cela signifie qu'elles ont toutes échoué (soit par erreur, soit en retournant un résultat vide).
-    // On peut alors jeter une erreur finale et définitive.
-    console.error("Échec final : Aucune stratégie n'a permis de récupérer une transcription valide.");
-    throw new Error("Après toutes les tentatives, aucune transcription exploitable n'a pu être trouvée pour cette vidéo.");
-}
-
-module.exports = { startAnalysis };
+module.exports = { startAnalysis, getAnalysisById };

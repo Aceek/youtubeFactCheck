@@ -16,3 +16,12 @@ export async function createAnalysis(youtubeUrl, transcriptionProvider) {
 
   return data;
 }
+
+export async function fetchAnalysis(id) {
+  const response = await fetch(`${API_URL}/analyses/${id}`);
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || `Erreur ${response.status}`);
+  }
+  return data;
+}

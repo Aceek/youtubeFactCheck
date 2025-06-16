@@ -1,23 +1,26 @@
-require('dotenv').config();
 const express = require('express');
-const videoController = require('./src/controllers/videoController');
+const cors = require('cors');
 const videoRoutes = require('./src/routes/videoRoutes');
 
 const app = express();
+// Alignement du port sur 3001 pour être cohérent avec docker-compose.yml
+const PORT = process.env.PORT || 3001;
 
+// --- Middlewares ---
+app.use(cors());
 app.use(express.json());
-app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
-    next();
+
+// --- Routes ---
+app.use('/api', videoRoutes);
+console.log("Routes initialisées sur le chemin /api");
+
+// --- Gestion des erreurs ---
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ error: 'Une erreur interne inattendue est survenue.' });
 });
 
-app.use('/', videoRoutes);
-
-app.get('/', (req, res) => {
-    res.send('Fact-Check Backend is running');
-});
-
-app.listen(3000, () => {
-    console.log('Backend running at http://localhost:3000');
+// --- Démarrage du serveur ---
+app.listen(PORT, () => {
+  console.log(`🚀 Le serveur est lancé et écoute sur le port ${PORT}`);
 });
