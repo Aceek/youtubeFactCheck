@@ -125,20 +125,27 @@ async function getAnalysisById(id) {
 }
 
 async function startAnalysis(youtubeUrl, transcriptionProvider) {
-  console.log(`Début de l'analyse pour l'URL: ${youtubeUrl}`);
+  console.log(`Début de l'analyse pour l'URL: ${youtubeUrl} avec le fournisseur: ${transcriptionProvider}`);
   const videoId = extractVideoId(youtubeUrl);
   if (!videoId) throw new Error('URL YouTube invalide.');
 
-  const existingAnalysis = await prisma.analysis.findFirst({
-    where: { videoId: videoId, status: 'COMPLETE' },
-    include: { transcription: true },
-  });
-  if (existingAnalysis) {
+  // --- MODIFICATION APPLIQUÉE ICI ---
+  // On conditionne la vérification du cache.
+  // Elle ne s'exécute que si le fournisseur n'est PAS le service de test.
+  if (transcriptionProvider !== 'MOCK_PROVIDER') {
+    const existingAnalysis = await prisma.analysis.findFirst({
+      where: { videoId: videoId, status: 'COMPLETE' },
+      include: { transcription: true },
+    });
+    if (existingAnalysis) {
       console.log(`Cache HIT: Analyse complète trouvée (ID: ${existingAnalysis.id}). Renvoi du résultat existant.`);
       return existingAnalysis;
+    }
+  } else {
+    console.log('MOCK_PROVIDER sélectionné, le cache est intentionnellement ignoré pour faciliter les tests.');
   }
   
-  console.log(`Cache MISS: Lancement d'un nouveau processus.`);
+  console.log(`Cache MISS ou ignoré: Lancement d'un nouveau processus.`);
 
   const video = await prisma.video.upsert({
     where: { id: videoId },
@@ -151,7 +158,6 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
       videoId: video.id,
       status: 'PENDING',
     },
-
   });
   
   runTranscriptionProcess(analysis.id, youtubeUrl, transcriptionProvider);
@@ -159,16 +165,11 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
   return analysis;
 }
 
-/**
- * MODIFICATION : La fonction de processus agit maintenant comme un routeur.
- * Elle appelle le bon service de transcription en fonction du 'provider'.
- */
 async function runTranscriptionProcess(analysisId, youtubeUrl, provider) {
   try {
     await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'TRANSCRIBING' } });
     
     let transcriptData;
-    // ROUTEUR DE STRATÉGIE
     if (provider === 'ASSEMBLY_AI') {
       console.log(`Sélection du fournisseur réel: ${provider}`);
       transcriptData = await getTranscriptFromAssemblyAI(youtubeUrl);
@@ -182,19 +183,20 @@ async function runTranscriptionProcess(analysisId, youtubeUrl, provider) {
     await prisma.transcription.create({
       data: {
         analysisId: analysisId,
-        provider: provider, // Sauvegarde le nom du fournisseur utilisé
+        provider: provider,
         content: transcriptData.structured,
         fullText: transcriptData.fullText,
       },
     });
 
-    await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'EXTRACTING_CLAIMS' } });
-    console.log(`Transcription terminée pour l'analyse ${analysisId} avec le fournisseur ${provider}.`);
+    await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'COMPLETE' } });
+    console.log(`Transcription terminée pour l'analyse ${analysisId}. Processus marqué comme COMPLET.`);
 
   } catch (error) {
     console.error(`Échec du processus pour l'analyse ${analysisId}:`, error.message);
     await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'FAILED' } });
   }
 }
+
 
 module.exports = { startAnalysis, getAnalysisById };
