@@ -84,6 +84,38 @@ async function getTranscriptFromAssemblyAI(youtubeUrl) {
   });
 }
 
+/**
+ * NOUVELLE FONCTION : Service de transcription "Mock".
+ * Simule le processus de transcription en utilisant une transcription existante.
+ * @returns {Promise<{fullText: string, structured: object}>} - Les données de transcription simulées.
+ */
+async function getTranscriptFromMockProvider() {
+  console.log('MOCK_PROVIDER: Démarrage de la transcription simulée.');
+  
+  // 1. On cherche des transcriptions existantes dans la base de données.
+  const existingTranscriptions = await prisma.transcription.findMany({
+    where: { fullText: { not: null } } // On s'assure de ne prendre que des transcriptions valides
+  });
+
+  if (existingTranscriptions.length === 0) {
+    console.error("MOCK_PROVIDER: Aucune transcription existante à utiliser. Veuillez d'abord lancer une vraie analyse.");
+    throw new Error("Le mode de test nécessite au moins une transcription réelle dans la base de données.");
+  }
+
+  // 2. On en choisit une au hasard.
+  const randomIndex = Math.floor(Math.random() * existingTranscriptions.length);
+  const mockData = existingTranscriptions[randomIndex];
+  console.log(`MOCK_PROVIDER: Utilisation de la transcription existante ID: ${mockData.id}`);
+
+  // 3. On simule un délai pour rendre l'expérience réaliste pour le frontend.
+  await sleep(3000); // Simule un délai de 3 secondes
+
+  console.log('MOCK_PROVIDER: ✅ Transcription simulée terminée !');
+  return {
+    fullText: mockData.fullText,
+    structured: mockData.content,
+  };
+}
 
 async function getAnalysisById(id) {
   return prisma.analysis.findUnique({
@@ -127,23 +159,37 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
   return analysis;
 }
 
+/**
+ * MODIFICATION : La fonction de processus agit maintenant comme un routeur.
+ * Elle appelle le bon service de transcription en fonction du 'provider'.
+ */
 async function runTranscriptionProcess(analysisId, youtubeUrl, provider) {
   try {
     await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'TRANSCRIBING' } });
     
-    const transcriptData = await getTranscriptFromAssemblyAI(youtubeUrl);
+    let transcriptData;
+    // ROUTEUR DE STRATÉGIE
+    if (provider === 'ASSEMBLY_AI') {
+      console.log(`Sélection du fournisseur réel: ${provider}`);
+      transcriptData = await getTranscriptFromAssemblyAI(youtubeUrl);
+    } else if (provider === 'MOCK_PROVIDER') {
+      console.log(`Sélection du fournisseur de test: ${provider}`);
+      transcriptData = await getTranscriptFromMockProvider();
+    } else {
+      throw new Error(`Fournisseur de transcription non supporté: "${provider}"`);
+    }
     
     await prisma.transcription.create({
       data: {
         analysisId: analysisId,
-        provider: provider,
+        provider: provider, // Sauvegarde le nom du fournisseur utilisé
         content: transcriptData.structured,
         fullText: transcriptData.fullText,
       },
     });
 
-    await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'COMPLETE' } });
-    console.log(`Processus terminé pour l'analyse ${analysisId}.`);
+    await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'EXTRACTING_CLAIMS' } });
+    console.log(`Transcription terminée pour l'analyse ${analysisId} avec le fournisseur ${provider}.`);
 
   } catch (error) {
     console.error(`Échec du processus pour l'analyse ${analysisId}:`, error.message);
