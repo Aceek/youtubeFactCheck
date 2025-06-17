@@ -28,6 +28,11 @@ model Analysis {
   video           Video    @relation(fields: [videoId], references: [id])
   videoId         String
   status          Status   @default(PENDING) // Pour suivre l'état de l'analyse (PENDING, TRANSCRIBING, EXTRACTING_CLAIMS, COMPLETE, FAILED)
+  
+  // --- NOUVEAU CHAMP ---
+  // Stocke le nom du modèle utilisé pour l'extraction des 'claims' (ex: "mistralai/mistral-7b-instruct:free")
+  llmModel        String?
+
   confidenceScore Float?   // Score de confiance global de la vidéo pour cette analyse
   transcription   Transcription?
   claims          Claim[]

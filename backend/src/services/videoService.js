@@ -181,114 +181,128 @@ async function getAnalysisById(id) {
 }
 
 async function startAnalysis(youtubeUrl, transcriptionProvider) {
-  console.log(
-    `Début de l'analyse pour l'URL: ${youtubeUrl} avec le fournisseur: ${transcriptionProvider}`
-  );
+  console.log(`Début de l'analyse pour l'URL: ${youtubeUrl} avec le fournisseur: ${transcriptionProvider}`);
   const videoId = extractVideoId(youtubeUrl);
-  if (!videoId) throw new Error("URL YouTube invalide.");
+  if (!videoId) throw new Error('URL YouTube invalide.');
 
-  if (transcriptionProvider !== "MOCK_PROVIDER") {
-    /**
-     * CORRECTION : On inclut aussi `claims` dans le cache.
-     */
-    const existingAnalysis = await prisma.analysis.findFirst({
-      where: { videoId: videoId, status: "COMPLETE" },
-      include: {
-        transcription: true,
-        claims: true, // <-- AJOUT CRUCIAL
-      },
+  // --- NOUVELLE LOGIQUE DE CACHE ET DE RE-ANALYSE ---
+  // On récupère le nom du modèle LLM actuel depuis l'environnement.
+  const currentLlmModel = process.env.OPENROUTER_MODEL || "mistralai/mistral-7b-instruct:free";
+
+  if (transcriptionProvider !== 'MOCK_PROVIDER') {
+    // On cherche la dernière analyse complète pour cette vidéo.
+    const lastAnalysis = await prisma.analysis.findFirst({
+      where: { videoId: videoId, status: 'COMPLETE' },
+      orderBy: { createdAt: 'desc' },
+      include: { transcription: true, claims: true },
     });
-    if (existingAnalysis) {
-      console.log(
-        `Cache HIT: Analyse complète trouvée (ID: ${existingAnalysis.id}). Renvoi du résultat existant.`
-      );
-      return existingAnalysis;
+
+    if (lastAnalysis) {
+      // Si le modèle utilisé est le même que le modèle actuel, on renvoie le cache.
+      if (lastAnalysis.llmModel === currentLlmModel) {
+        console.log(`Cache HIT: Analyse complète trouvée (ID: ${lastAnalysis.id}) avec le même LLM (${currentLlmModel}). Renvoi du résultat existant.`);
+        return lastAnalysis;
+      }
+      
+      // SINON, le modèle a changé ! On lance une RE-ANALYSE.
+      console.log(`RE-ANALYSE: Le modèle LLM a changé de "${lastAnalysis.llmModel}" à "${currentLlmModel}".`);
+      const newAnalysis = await prisma.analysis.create({
+        data: { videoId: videoId, status: 'PENDING' },
+      });
+      // On lance le processus d'extraction sur la transcription existante.
+      runClaimExtractionProcess(newAnalysis.id, lastAnalysis.transcription);
+      return newAnalysis;
     }
   } else {
-    console.log(
-      "MOCK_PROVIDER sélectionné, le cache est intentionnellement ignoré pour faciliter les tests."
-    );
+    console.log('MOCK_PROVIDER sélectionné, le cache est ignoré.');
   }
-
-  console.log(`Cache MISS ou ignoré: Lancement d'un nouveau processus.`);
+  
+  console.log(`Cache MISS: Lancement d'un nouveau processus complet.`);
 
   const video = await prisma.video.upsert({
     where: { id: videoId },
     update: {},
     create: { id: videoId, youtubeUrl },
   });
-
   const analysis = await prisma.analysis.create({
-    data: { videoId: video.id, status: "PENDING" },
+    data: { videoId: video.id, status: 'PENDING' },
   });
-
-  runTranscriptionProcess(analysis.id, youtubeUrl, transcriptionProvider);
+  
+  // Le processus complet (transcription + extraction)
+  runFullProcess(analysis.id, youtubeUrl, transcriptionProvider);
   return analysis;
 }
 
-async function runTranscriptionProcess(analysisId, youtubeUrl, provider) {
+/**
+ * Processus complet : Transcription PUIS Extraction.
+ */
+async function runFullProcess(analysisId, youtubeUrl, provider) {
   try {
     // 1. Transcription
-    await prisma.analysis.update({
-      where: { id: analysisId },
-      data: { status: "TRANSCRIBING" },
-    });
-    const transcriptData = await getTranscriptFromProvider(
-      provider,
-      youtubeUrl
-    );
+    await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'TRANSCRIBING' } });
+    const transcriptData = await getTranscriptFromProvider(provider, youtubeUrl);
     const transcription = await prisma.transcription.create({
       data: {
         analysisId: analysisId,
         provider: provider,
         content: transcriptData.structured,
         fullText: transcriptData.fullText,
-      },
+      }
     });
 
-    // 2. Extraction des faits (AVEC ROUTEUR DE MOCK)
-    await prisma.analysis.update({
-      where: { id: analysisId },
-      data: { status: "EXTRACTING_CLAIMS" },
-    });
+    // 2. On lance l'extraction des faits
+    await runClaimExtractionProcess(analysisId, transcription);
 
+  } catch (error) {
+    console.error(`Échec du processus complet pour l'analyse ${analysisId}:`, error.message);
+    await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'FAILED' } });
+  }
+}
+
+/**
+ * Processus partiel : Uniquement l'Extraction des Faits (pour la ré-analyse).
+ * @param {number} analysisId - L'ID de la NOUVELLE analyse.
+ * @param {object} transcription - La transcription EXISTANTE à analyser.
+ */
+async function runClaimExtractionProcess(analysisId, transcription) {
+  try {
+    const provider = transcription.provider === 'MOCK_PROVIDER' ? 'MOCK_PROVIDER' : 'ASSEMBLY_AI';
+    const currentLlmModel = process.env.OPENROUTER_MODEL || "mistralai/mistral-7b-instruct:free";
+
+    // ÉTAPE D'EXTRACTION
+    await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'EXTRACTING_CLAIMS' } });
+    
     let claimsText;
-    if (provider === "MOCK_PROVIDER") {
+    if (provider === 'MOCK_PROVIDER') {
       claimsText = await claimExtractionService.mockExtractClaimsFromText();
     } else {
-      claimsText = await claimExtractionService.extractClaimsFromText(
-        transcription.fullText
-      );
+      claimsText = await claimExtractionService.extractClaimsFromText(transcription.fullText);
     }
-
-    console.log(
-      `${claimsText.length} affirmations extraites. Sauvegarde en cours...`
-    );
+    
+    console.log(`${claimsText.length} affirmations extraites avec le modèle ${currentLlmModel}.`);
     if (claimsText.length > 0) {
       await prisma.claim.createMany({
-        data: claimsText.map((claimText) => ({
+        data: claimsText.map(claimText => ({
           analysisId: analysisId,
           text: claimText,
-          timestamp: 0, // TODO: Approximer l'horodatage
+          timestamp: 0,
         })),
       });
     }
 
-    // 3. Terminé
+    // TERMINÉ : On met à jour le statut ET le nom du modèle utilisé.
     await prisma.analysis.update({
       where: { id: analysisId },
-      data: { status: "COMPLETE" },
+      data: {
+        status: 'COMPLETE',
+        llmModel: currentLlmModel, // <-- On sauvegarde le modèle
+      }
     });
     console.log(`Analyse ${analysisId} terminée avec succès.`);
+
   } catch (error) {
-    console.error(
-      `Échec du processus pour l'analyse ${analysisId}:`,
-      error.message
-    );
-    await prisma.analysis.update({
-      where: { id: analysisId },
-      data: { status: "FAILED" },
-    });
+    console.error(`Échec du processus d'extraction pour l'analyse ${analysisId}:`, error.message);
+    await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'FAILED' } });
   }
 }
 
