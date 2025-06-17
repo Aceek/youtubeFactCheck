@@ -7,9 +7,7 @@ import { useAnalysis } from '../hooks/useAnalysis';
 function HomePage() {
   const { analysis, isLoading, error, startAnalysis, rerunClaimExtraction } = useAnalysis();
   const [player, setPlayer] = useState(null);
-  const [playerKey, setPlayerKey] = useState(0); // <-- NOUVEL ÉTAT
-
-  const isProcessing = isLoading || (analysis && analysis.status !== 'COMPLETE' && analysis.status !== 'FAILED');
+  const [playerKey, setPlayerKey] = useState(0);
 
   const handleRerun = () => {
     if (analysis) {
@@ -17,9 +15,7 @@ function HomePage() {
     }
   };
 
-  const handlePlayerReady = (eventTarget) => {
-    setPlayer(eventTarget);
-  };
+  const handlePlayerReady = (eventTarget) => setPlayer(eventTarget);
 
   const handleClaimClick = (timestamp) => {
     if (player) {
@@ -28,11 +24,13 @@ function HomePage() {
     }
   };
 
-  // --- NOUVELLE FONCTION ---
-  const handleReloadPlayer = () => {
-    setPlayer(null); // On réinitialise l'instance du player
-    setPlayerKey(prevKey => prevKey + 1); // On change la clé pour forcer le re-montage
-  };
+  const handleReloadPlayer = () => setPlayerKey(prevKey => prevKey + 1);
+
+  // --- CORRECTION CLÉ DE LA LOGIQUE D'AFFICHAGE ---
+  // On affiche le spinner global SEULEMENT pendant le tout premier chargement.
+  const showGlobalStatus = isLoading && !analysis?.transcription;
+  // On affiche la page de résultats DÈS qu'une transcription est disponible.
+  const showResults = analysis?.transcription;
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
@@ -44,18 +42,17 @@ function HomePage() {
           <p>{error}</p>
         </div>
       )}
-      {isProcessing && analysis && ( <AnalysisStatus analysis={analysis} /> )}
 
-      {/* Affiche le résultat final si l'analyse est terminée */}
-      {analysis && analysis.status === 'COMPLETE' && (
+      {showGlobalStatus && <AnalysisStatus analysis={analysis} />}
+
+      {showResults && (
         <AnalysisResult
           analysis={analysis}
-          playerKey={playerKey} // On passe la clé
+          playerKey={playerKey}
           onPlayerReady={handlePlayerReady}
           onClaimClick={handleClaimClick}
-          onRerunClaims={handleRerun} // On passe la fonction
-          onReloadPlayer={handleReloadPlayer} // On passe la fonction de rechargement
-          isProcessing={isProcessing} // Et l'état de chargement
+          onRerunClaims={handleRerun}
+          onReloadPlayer={handleReloadPlayer}
         />
       )}
     </div>

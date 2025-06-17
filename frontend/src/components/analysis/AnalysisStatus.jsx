@@ -22,6 +22,9 @@ const DotIcon = () => (
 
 
 function AnalysisStatus({ analysis }) {
+  // Sécurité : si analysis est null ou ne contient pas de status, on n'affiche rien
+  if (!analysis || !analysis.status) return null;
+
   // Définir les étapes de notre processus. C'est facilement extensible pour le futur.
   const steps = [
     { status: 'PENDING', label: 'Initialisation de l\'analyse' },

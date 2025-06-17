@@ -1,11 +1,11 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { createAnalysis, fetchAnalysis, reRunClaims } from '../api/analysisApi'; // Importer reRunClaims
+import { createAnalysis, fetchAnalysis, reRunClaims } from '../api/analysisApi';
 
 export function useAnalysis() {
   const [analysis, setAnalysis] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
-  
+
   const pollingIntervalRef = useRef(null);
 
   const stopPolling = () => {
@@ -14,12 +14,13 @@ export function useAnalysis() {
       pollingIntervalRef.current = null;
     }
   };
-  
+
   const pollAnalysis = useCallback(async (id) => {
     try {
       const updatedAnalysis = await fetchAnalysis(id);
       setAnalysis(updatedAnalysis);
 
+      // On arrête le polling et le chargement principal SEULEMENT si l'état est final.
       if (updatedAnalysis.status === 'COMPLETE' || updatedAnalysis.status === 'FAILED') {
         setIsLoading(false);
         stopPolling();
@@ -32,8 +33,8 @@ export function useAnalysis() {
   }, []);
 
   const startAnalysis = useCallback(async (url, provider) => {
-    stopPolling(); // Arrête tout polling précédent
-    setIsLoading(true);
+    stopPolling();
+    setIsLoading(true); // Seul le chargement initial utilise cet état
     setError(null);
     setAnalysis(null);
 
@@ -41,13 +42,11 @@ export function useAnalysis() {
       const initialAnalysis = await createAnalysis(url, provider);
       setAnalysis(initialAnalysis);
 
-      // Si l'analyse est déjà complète (cache hit), on s'arrête là.
-      if(initialAnalysis.status === 'COMPLETE') {
+      if (initialAnalysis.status === 'COMPLETE') {
         setIsLoading(false);
         return;
       }
 
-      // Sinon, on commence le polling.
       pollingIntervalRef.current = setInterval(() => {
         pollAnalysis(initialAnalysis.id);
       }, 5000);
@@ -58,26 +57,33 @@ export function useAnalysis() {
     }
   }, [pollAnalysis]);
 
-  // --- NOUVELLE FONCTION ---
   const rerunClaimExtraction = useCallback(async (id) => {
     stopPolling();
-    setIsLoading(true);
     setError(null);
     try {
-      const updatedAnalysis = await reRunClaims(id);
-      setAnalysis(updatedAnalysis);
-      // On relance le polling pour suivre la nouvelle progression
+      // --- CORRECTION CLÉ : MISE À JOUR OPTIMISTE ET NON DESTRUCTIVE ---
+      // On met à jour l'état local immédiatement pour une meilleure réactivité.
+      // On préserve toutes les données existantes (comme .transcription) et on ne change que ce qui est nécessaire.
+      setAnalysis(prevAnalysis => ({
+        ...prevAnalysis,
+        status: 'EXTRACTING_CLAIMS', // On passe directement à l'étape d'extraction
+        claims: [], // On vide les anciens claims de l'UI immédiatement
+      }));
+
+      // On lance la requête au backend en arrière-plan
+      await reRunClaims(id);
+
+      // On relance le polling pour suivre la progression et obtenir les nouveaux claims
       pollingIntervalRef.current = setInterval(() => {
         pollAnalysis(id);
       }, 5000);
     } catch (err) {
       setError(err.message);
-      setIsLoading(false);
     }
   }, [pollAnalysis]);
 
   useEffect(() => { return () => stopPolling(); }, []);
 
-  // On exporte la nouvelle fonction
+  // On n'a plus besoin de 'isRerunning'
   return { analysis, isLoading, error, startAnalysis, rerunClaimExtraction };
 }
