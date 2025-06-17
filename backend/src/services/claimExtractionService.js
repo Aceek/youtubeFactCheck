@@ -1,36 +1,30 @@
 const { OpenAI } = require('openai');
-const prisma = require('../client'); // On importe une instance partagée de Prisma
 const fs = require('fs');
 const path = require('path');
+// Le client Prisma n'est plus nécessaire ici
+// const prisma = require('../client');
 
-// Configuration du client pour OpenRouter
 const openrouter = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENROUTER_API_KEY, // Assurez-vous d'ajouter cette clé à votre .env
+  apiKey: process.env.OPENROUTER_API_KEY,
 });
-
 // --- CHARGEMENT DYNAMIQUE DU PROMPT ---
 // On lit le prompt depuis un fichier externe pour une modification facile.
 const promptPath = path.join(__dirname, '../prompts/claim_extraction.prompt.txt');
 const SYSTEM_PROMPT = fs.readFileSync(promptPath, 'utf-8');
 
 /**
- * Extrait les affirmations factuelles d'une transcription.
- * @param {string} fullText - Le texte complet de la transcription.
- * @returns {Promise<Array<string>>} Un tableau des affirmations extraites.
+ * MODIFICATION : Extrait les affirmations ET leur horodatage approximatif.
+ * @param {Array<object>} structuredTranscript - La transcription structurée d'AssemblyAI (avec les mots et leurs timestamps).
+ * @returns {Promise<Array<{text: string, timestamp: number}>>} Un tableau d'objets "claim".
  */
-async function extractClaimsFromText(fullText) {
-  // Pour l'instant, on ne gère pas le "chunking". On suppose que le texte est assez court.
-  // TODO: Implémenter une stratégie de découpage pour les textes longs.
-  console.log('Envoi de la transcription au LLM pour extraction...');
-
-  // --- LECTURE DYNAMIQUE DU MODÈLE ---
-  // On lit le nom du modèle depuis les variables d'environnement, avec une valeur par défaut.
+async function extractClaimsWithTimestamps(structuredTranscript) {
+  const fullText = structuredTranscript.map(word => word.text).join(' ');
   const model = process.env.OPENROUTER_MODEL || "mistralai/mistral-7b-instruct:free";
+  
   console.log(`Envoi de la transcription au LLM (Modèle: ${model}) pour extraction...`);
-
   const response = await openrouter.chat.completions.create({
-    model: model, // Utilisation de la variable
+    model: model,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: fullText }
@@ -39,21 +33,38 @@ async function extractClaimsFromText(fullText) {
   });
 
   const rawJson = response.choices[0].message.content;
-  console.log('Réponse JSON brute du LLM reçue.');
-
+  let parsedClaims = [];
   try {
     const parsed = JSON.parse(rawJson);
-    // On valide que la réponse a le bon format
-    if (!parsed.claims || !Array.isArray(parsed.claims)) {
-      throw new Error("La réponse du LLM n'a pas le format attendu { claims: [...] }");
-    }
-    // On extrait uniquement le texte de chaque 'claim'
-    return parsed.claims.map(c => c.claim).filter(Boolean);
+    if (!parsed.claims || !Array.isArray(parsed.claims)) throw new Error("Format JSON invalide");
+    parsedClaims = parsed.claims.map(c => c.claim).filter(Boolean);
   } catch (e) {
     console.error("Erreur de parsing de la réponse JSON du LLM:", e);
-    console.error("Réponse brute reçue:", rawJson);
     throw new Error("N'a pas pu parser la réponse du service d'IA.");
   }
+  
+  console.log(`${parsedClaims.length} affirmations brutes extraites. Recherche des timestamps...`);
+
+  // --- NOUVELLE LOGIQUE : Trouver l'horodatage pour chaque "claim" ---
+  const claimsWithTimestamps = parsedClaims.map(claimText => {
+    // On nettoie le texte du claim pour une meilleure correspondance
+    const cleanClaimText = claimText.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"").toLowerCase();
+    
+    // On cherche la première occurrence du premier mot du claim dans la transcription
+    const firstWord = cleanClaimText.split(' ')[0];
+    const wordIndex = structuredTranscript.findIndex(word => word.text.toLowerCase().includes(firstWord));
+
+    if (wordIndex !== -1) {
+      // On a trouvé le mot ! On prend son horodatage de début en millisecondes.
+      const timestampMs = structuredTranscript[wordIndex].start;
+      return { text: claimText, timestamp: Math.round(timestampMs / 1000) }; // On convertit en secondes
+    }
+    
+    // Si on ne trouve pas de correspondance, on met un timestamp par défaut
+    return { text: claimText, timestamp: 0 };
+  });
+
+  return claimsWithTimestamps;
 }
 
 /**
@@ -87,4 +98,4 @@ async function mockExtractClaimsFromText() {
 }
 
 
-module.exports = { extractClaimsFromText, mockExtractClaimsFromText };
+module.exports = { extractClaimsWithTimestamps, mockExtractClaimsFromText: () => Promise.resolve([]) };

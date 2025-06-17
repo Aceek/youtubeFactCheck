@@ -267,26 +267,27 @@ async function runFullProcess(analysisId, youtubeUrl, provider) {
  */
 async function runClaimExtractionProcess(analysisId, transcription) {
   try {
-    const provider = transcription.provider === 'MOCK_PROVIDER' ? 'MOCK_PROVIDER' : 'ASSEMBLY_AI';
+    const provider = transcription.provider; // On utilise le vrai provider de la transcription
     const currentLlmModel = process.env.OPENROUTER_MODEL || "mistralai/mistral-7b-instruct:free";
 
     // ÉTAPE D'EXTRACTION
     await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'EXTRACTING_CLAIMS' } });
     
-    let claimsText;
+    let claimsData;
     if (provider === 'MOCK_PROVIDER') {
-      claimsText = await claimExtractionService.mockExtractClaimsFromText();
+      claimsData = await claimExtractionService.mockExtractClaimsFromText();
     } else {
-      claimsText = await claimExtractionService.extractClaimsFromText(transcription.fullText);
+      // On passe maintenant la transcription STRUCTURÉE
+      claimsData = await claimExtractionService.extractClaimsWithTimestamps(transcription.content);
     }
     
-    console.log(`${claimsText.length} affirmations extraites avec le modèle ${currentLlmModel}.`);
-    if (claimsText.length > 0) {
+    console.log(`${claimsData.length} affirmations extraites avec le modèle ${currentLlmModel}.`);
+    if (claimsData.length > 0) {
       await prisma.claim.createMany({
-        data: claimsText.map(claimText => ({
+        data: claimsData.map(claim => ({
           analysisId: analysisId,
-          text: claimText,
-          timestamp: 0,
+          text: claim.text,
+          timestamp: claim.timestamp, // <-- On sauvegarde le bon timestamp !
         })),
       });
     }
