@@ -18,6 +18,9 @@ model Video {
   youtubeUrl String    @unique
   title      String?   // On pourra récupérer ces infos plus tard
   author     String?
+  description String?   @db.Text
+  publishedAt DateTime?
+  thumbnailUrl String?
   analyses   Analysis[]
   createdAt  DateTime  @default(now())
 }
@@ -32,6 +35,8 @@ model Analysis {
   // --- NOUVEAU CHAMP ---
   // Stocke le nom du modèle utilisé pour l'extraction des 'claims' (ex: "mistralai/mistral-7b-instruct:free")
   llmModel        String?
+  // --- ERREURS NON-BLOQUANTES ---
+  errorMessage    String?  @db.Text
 
   confidenceScore Float?   // Score de confiance global de la vidéo pour cette analyse
   transcription   Transcription?
@@ -41,6 +46,7 @@ model Analysis {
 }
 
 // Modèle pour la transcription
+
 model Transcription {
   id                Int      @id @default(autoincrement())
   analysis          Analysis @relation(fields: [analysisId], references: [id])
@@ -77,11 +83,12 @@ model Source {
 
 // Enums pour standardiser les valeurs
 enum Status {
-  PENDING
-  TRANSCRIBING
-  EXTRACTING_CLAIMS
-  COMPLETE
-  FAILED
+ PENDING
+ FETCHING_METADATA
+ TRANSCRIBING
+ EXTRACTING_CLAIMS
+ COMPLETE
+ FAILED
 }
 
 enum Verdict {

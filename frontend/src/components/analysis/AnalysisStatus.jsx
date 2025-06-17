@@ -28,6 +28,7 @@ function AnalysisStatus({ analysis }) {
   // Définir les étapes de notre processus. C'est facilement extensible pour le futur.
   const steps = [
     { status: 'PENDING', label: 'Initialisation de l\'analyse' },
+    { status: 'FETCHING_METADATA', label: 'Récupération des informations de la vidéo' }, // <-- NOUVELLE ÉTAPE
     { status: 'TRANSCRIBING', label: 'Téléchargement et Transcription de l\'audio' },
     { status: 'EXTRACTING_CLAIMS', label: 'Extraction des affirmations factuelles' },
     { status: 'COMPLETE', label: 'Analyse terminée' }

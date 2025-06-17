@@ -17,6 +17,44 @@ function extractVideoId(url) {
   return match ? match[1] : null;
 }
 
+// --- NOUVELLE FONCTION UTILITAIRE ---
+async function getVideoMetadata(youtubeUrl) {
+    return new Promise((resolve, reject) => {
+        console.log("Récupération des métadonnées de la vidéo...");
+        // --dump-json est très puissant, il sort toutes les métadonnées en un seul bloc JSON.
+        const ytDlpProcess = spawn('yt-dlp', ['--dump-json', '-o', '-', youtubeUrl]);
+
+        let jsonData = "";
+        let stderr = "";
+
+        ytDlpProcess.stdout.on('data', (data) => {
+            jsonData += data.toString();
+        });
+        ytDlpProcess.stderr.on('data', (data) => {
+            stderr += data.toString();
+        });
+
+        ytDlpProcess.on('close', (code) => {
+            if (code !== 0) {
+                console.error(`yt-dlp (metadata) a quitté avec le code ${code}. Erreur: ${stderr}`);
+                return reject(new Error("Impossible de récupérer les métadonnées de la vidéo."));
+            }
+            try {
+                const metadata = JSON.parse(jsonData);
+                resolve({
+                    title: metadata.title,
+                    author: metadata.uploader,
+                    description: metadata.description,
+                    publishedAt: metadata.upload_date ? new Date(metadata.upload_date.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3')) : null,
+                    thumbnailUrl: metadata.thumbnail
+                });
+            } catch (error) {
+                reject(new Error("Erreur de parsing des métadonnées JSON de la vidéo."));
+            }
+        });
+    });
+}
+
 async function getTranscriptFromAssemblyAI(youtubeUrl) {
   if (!ASSEMBLYAI_API_KEY) {
     throw new Error(
@@ -186,6 +224,7 @@ async function getAnalysisById(id) {
     include: {
       transcription: true,
       claims: true,
+      video: true, // <-- AJOUTER CETTE LIGNE
     },
   });
 }
@@ -246,27 +285,63 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
 /**
  * Processus complet : Transcription PUIS Extraction.
  */
+/**
+ * Processus complet : Métadonnées -> Transcription -> Extraction.
+ * Gère les erreurs de manière plus granulaire.
+ */
 async function runFullProcess(analysisId, youtubeUrl, provider) {
-  try {
-    // 1. Transcription
-    await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'TRANSCRIBING' } });
-    const transcriptData = await getTranscriptFromProvider(provider, youtubeUrl);
-    const transcription = await prisma.transcription.create({
-      data: {
-        analysisId: analysisId,
-        provider: provider, // On utilise le provider original ici aussi
-        // On sauvegarde l'objet complet {fullText, words, paragraphs} dans `content`
-        content: transcriptData,
-        fullText: transcriptData.fullText,
-      }
-    });
+    // --- ÉTAPE 1: RÉCUPÉRATION DES MÉTADONNÉES (NON-BLOQUANTE) ---
+    try {
+        await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'FETCHING_METADATA' } });
+        
+        const metadata = await getVideoMetadata(youtubeUrl);
+        const videoId = extractVideoId(youtubeUrl);
+        await prisma.video.update({
+            where: { id: videoId },
+            data: {
+                title: metadata.title,
+                author: metadata.author,
+                description: metadata.description,
+                publishedAt: metadata.publishedAt,
+                thumbnailUrl: metadata.thumbnailUrl,
+            }
+        });
+        console.log("✅ Métadonnées récupérées avec succès.");
 
-    await runClaimExtractionProcess(analysisId, transcription, provider);
+    } catch (error) {
+        console.warn(`⚠️ Échec de la récupération des métadonnées (non-bloquant) : ${error.message}`);
+        // On enregistre l'erreur dans l'analyse mais on continue le processus.
+        await prisma.analysis.update({
+            where: { id: analysisId },
+            data: { errorMessage: `Échec de la récupération des métadonnées : ${error.message}` }
+        });
+    }
 
-  } catch (error) {
-    console.error(`Échec du processus complet pour l'analyse ${analysisId}:`, error.message);
-    await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'FAILED' } });
-  }
+    // --- ÉTAPE 2: TRANSCRIPTION (BLOQUANTE) ---
+    try {
+        await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'TRANSCRIBING' } });
+        const transcriptData = await getTranscriptFromProvider(provider, youtubeUrl);
+        const transcription = await prisma.transcription.create({
+            data: {
+                analysisId: analysisId,
+                provider: provider,
+                content: transcriptData,
+                fullText: transcriptData.fullText,
+            }
+        });
+
+        // --- ÉTAPE 3: EXTRACTION DES CLAIMS (BLOQUANTE) ---
+        // Le reste du processus est lancé depuis ici
+        await runClaimExtractionProcess(analysisId, transcription, provider);
+
+    } catch (criticalError) {
+        // Si la transcription ou l'extraction échoue, c'est une erreur critique.
+        console.error(`Échec critique du processus pour l'analyse ${analysisId}:`, criticalError.message);
+        await prisma.analysis.update({
+            where: { id: analysisId },
+            data: { status: 'FAILED', errorMessage: `Erreur critique : ${criticalError.message}` }
+        });
+    }
 }
 
 /**
@@ -277,7 +352,10 @@ async function runFullProcess(analysisId, youtubeUrl, provider) {
  */
 async function runClaimExtractionProcess(analysisId, transcription, provider) {
   try {
-    const currentLlmModel = process.env.OPENROUTER_MODEL || "mistralai/mistral-7b-instruct:free";
+    // MODIFICATION : Le modèle dépend maintenant du provider
+    const currentLlmModel = provider === 'MOCK_PROVIDER'
+      ? 'MOCK_PROVIDER'
+      : process.env.OPENROUTER_MODEL || "mistralai/mistral-7b-instruct:free";
 
     await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'EXTRACTING_CLAIMS' } });
     
@@ -285,11 +363,10 @@ async function runClaimExtractionProcess(analysisId, transcription, provider) {
     if (provider === 'MOCK_PROVIDER') {
       claimsData = await claimExtractionService.mockExtractClaimsFromText();
     } else {
-      // ON PASSE L'ID DE L'ANALYSE ET LE MODÈLE
       claimsData = await claimExtractionService.extractClaimsWithTimestamps(
         analysisId,
         transcription.content,
-        currentLlmModel // <-- Pour le logging complet
+        currentLlmModel
       );
     }
     
@@ -305,6 +382,7 @@ async function runClaimExtractionProcess(analysisId, transcription, provider) {
     }
 
     // TERMINÉ : On met à jour le statut ET le nom du modèle utilisé.
+    // L'analyse mock aura maintenant "MOCK_PROVIDER" comme llmModel.
     await prisma.analysis.update({
       where: { id: analysisId },
       data: {
