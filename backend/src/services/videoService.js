@@ -2,6 +2,8 @@ const { PrismaClient } = require("@prisma/client");
 const axios = require("axios");
 const { spawn } = require("child_process");
 const claimExtractionService = require("./claimExtractionService");
+const fs = require('fs');
+const path = require('path');
 
 const prisma = require("../client"); // Utilisation du client partagé
 
@@ -21,35 +23,72 @@ function extractVideoId(url) {
 async function getVideoMetadata(youtubeUrl) {
     return new Promise((resolve, reject) => {
         console.log("Récupération des métadonnées de la vidéo...");
-        // --dump-json est très puissant, il sort toutes les métadonnées en un seul bloc JSON.
         const ytDlpProcess = spawn('yt-dlp', ['--dump-json', '-o', '-', youtubeUrl]);
 
-        let jsonData = "";
-        let stderr = "";
+        let outputData = ""; // Va collecter les données de stdout ET stderr
+        let errorMessages = ""; // Va collecter les messages d'erreur purs
 
+        // On écoute sur les deux canaux
         ytDlpProcess.stdout.on('data', (data) => {
-            jsonData += data.toString();
+            outputData += data.toString();
         });
         ytDlpProcess.stderr.on('data', (data) => {
-            stderr += data.toString();
+            // On considère que stderr peut contenir soit le JSON, soit des erreurs.
+            outputData += data.toString();
+            errorMessages += data.toString();
         });
 
         ytDlpProcess.on('close', (code) => {
-            if (code !== 0) {
-                console.error(`yt-dlp (metadata) a quitté avec le code ${code}. Erreur: ${stderr}`);
-                return reject(new Error("Impossible de récupérer les métadonnées de la vidéo."));
+            const debugDir = path.resolve('./results');
+            fs.mkdirSync(debugDir, { recursive: true });
+            const timestamp = new Date().toISOString().replace(/:/g, '-');
+            const videoId = extractVideoId(youtubeUrl) || 'unknown';
+            const metadataFilePath = path.join(debugDir, `${videoId}_${timestamp}_metadata-output.txt`);
+            
+            // On écrit la sortie combinée pour le débogage
+            fs.writeFileSync(metadataFilePath, `--- COMBINED OUTPUT ---\n${outputData}\n\n--- RAW STDERR ---\n${errorMessages}`);
+            console.log(`Sortie brute des métadonnées sauvegardée dans : ${metadataFilePath}`);
+
+            if (!outputData.trim()) {
+                // Si les deux canaux sont vides, on rejette.
+                return reject(new Error("Aucune donnée (stdout/stderr) reçue de yt-dlp pour les métadonnées."));
             }
+
             try {
-                const metadata = JSON.parse(jsonData);
+                const jsonLines = outputData.trim().split('\n');
+                let metadata = null;
+
+                for (const line of jsonLines) {
+                    try {
+                        const parsedLine = JSON.parse(line);
+                        if (typeof parsedLine === 'object' && parsedLine.title) {
+                            metadata = parsedLine;
+                            break;
+                        }
+                    } catch (lineError) {
+                        continue;
+                    }
+                }
+
+                if (!metadata) {
+                    // Cette erreur est maintenant plus pertinente: le JSON était présent mais invalide ou incomplet.
+                    throw new Error("Impossible de trouver un objet JSON de métadonnées valide dans la sortie de yt-dlp.");
+                }
+
                 resolve({
                     title: metadata.title,
-                    author: metadata.uploader,
+                    author: metadata.uploader || metadata.channel,
                     description: metadata.description,
                     publishedAt: metadata.upload_date ? new Date(metadata.upload_date.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3')) : null,
                     thumbnailUrl: metadata.thumbnail
                 });
             } catch (error) {
-                reject(new Error("Erreur de parsing des métadonnées JSON de la vidéo."));
+                // Si le code n'est pas 0 ET qu'on n'a pas pu parser, c'est une vraie erreur.
+                if (code !== 0) {
+                     return reject(new Error(`yt-dlp a quitté avec le code ${code}. Erreur: ${errorMessages}`));
+                }
+                // Sinon, c'est juste un problème de parsing de la sortie.
+                reject(new Error(`Erreur de parsing des métadonnées JSON : ${error.message}`));
             }
         });
     });
@@ -224,7 +263,7 @@ async function getAnalysisById(id) {
     include: {
       transcription: true,
       claims: true,
-      video: true, // <-- AJOUTER CETTE LIGNE
+      video: true,
     },
   });
 }
