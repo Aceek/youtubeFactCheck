@@ -24,18 +24,19 @@ async function getTranscriptFromAssemblyAI(youtubeUrl) {
     );
   }
 
+  // --- AMÉLIORATION DE SÉCURITÉ MAJEURE ---
+  // On ne fait plus confiance à l'URL brute. On la reconstruit à partir de l'ID extrait.
+  // Cela élimine tout risque d'injection de commande.
+  const videoId = extractVideoId(youtubeUrl);
+  if (!videoId) {
+    throw new Error("L'ID de la vidéo n'a pas pu être extrait de l'URL fournie.");
+  }
+  const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  
   return new Promise((resolve, reject) => {
-    console.log(`1/3 - Lancement de yt-dlp pour l'URL: ${youtubeUrl}`);
-    const ytDlpProcess = spawn("yt-dlp", [
-      "-f",
-      "bestaudio",
-      "-x",
-      "--audio-format",
-      "mp3",
-      "-o",
-      "-",
-      youtubeUrl,
-    ]);
+    console.log(`1/3 - Lancement de yt-dlp pour l'URL sécurisée: ${cleanUrl}`);
+    // On utilise l'URL nettoyée, pas l'URL de l'utilisateur.
+    const ytDlpProcess = spawn('yt-dlp', ['-f', 'bestaudio', '-x', '--audio-format', 'mp3', '-o', '-', cleanUrl]);
 
     let stderr = "";
     ytDlpProcess.stderr.on("data", (data) => {
