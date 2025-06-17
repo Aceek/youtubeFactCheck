@@ -1,11 +1,3 @@
-Vous avez absolument raison. C'est une excellente remarque. Un bon `README` ne doit pas seulement décrire ce qui est fait, mais aussi la **vision finale** du projet. Omettre le fact-checking, qui est l'objectif principal, serait une erreur majeure.
-
-Je vais réintégrer cette dimension pour que le document soit complet, reflétant à la fois l'état actuel et l'ambition du projet.
-
-Voici une version mise à jour qui, je pense, répond parfaitement à votre besoin.
-
----
-
 # Plateforme de Fact-Checking pour Vidéos YouTube
 _(YouTube Video Fact-Checking Web Platform)_
 
