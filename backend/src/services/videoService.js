@@ -1,6 +1,8 @@
 const { PrismaClient } = require('@prisma/client');
 const axios = require('axios');
 const { spawn } = require('child_process');
+const claimExtractionService = require('./claimExtractionService'); // NOUVEL IMPORT
+
 
 const prisma = new PrismaClient();
 
@@ -84,6 +86,13 @@ async function getTranscriptFromAssemblyAI(youtubeUrl) {
   });
 }
 
+// Renommez la fonction de routage pour plus de clarté
+async function getTranscriptFromProvider(provider, youtubeUrl) {
+    if (provider === 'ASSEMBLY_AI') return getTranscriptFromAssemblyAI(youtubeUrl);
+    if (provider === 'MOCK_PROVIDER') return getTranscriptFromMockProvider();
+    throw new Error(`Fournisseur non supporté: "${provider}"`);
+}
+
 /**
  * NOUVELLE FONCTION : Service de transcription "Mock".
  * Simule le processus de transcription en utilisant une transcription existante.
@@ -120,7 +129,10 @@ async function getTranscriptFromMockProvider() {
 async function getAnalysisById(id) {
   return prisma.analysis.findUnique({
     where: { id },
-    include: { transcription: true },
+    include: {
+      transcription: true,
+      claims: true,
+    },
   });
 }
 
@@ -129,13 +141,16 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
   const videoId = extractVideoId(youtubeUrl);
   if (!videoId) throw new Error('URL YouTube invalide.');
 
-  // --- MODIFICATION APPLIQUÉE ICI ---
-  // On conditionne la vérification du cache.
-  // Elle ne s'exécute que si le fournisseur n'est PAS le service de test.
   if (transcriptionProvider !== 'MOCK_PROVIDER') {
+    /**
+     * CORRECTION : On inclut aussi `claims` dans le cache.
+     */
     const existingAnalysis = await prisma.analysis.findFirst({
       where: { videoId: videoId, status: 'COMPLETE' },
-      include: { transcription: true },
+      include: {
+        transcription: true,
+        claims: true, // <-- AJOUT CRUCIAL
+      },
     });
     if (existingAnalysis) {
       console.log(`Cache HIT: Analyse complète trouvée (ID: ${existingAnalysis.id}). Renvoi du résultat existant.`);
@@ -154,43 +169,45 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
   });
 
   const analysis = await prisma.analysis.create({
-    data: {
-      videoId: video.id,
-      status: 'PENDING',
-    },
+    data: { videoId: video.id, status: 'PENDING' },
   });
   
   runTranscriptionProcess(analysis.id, youtubeUrl, transcriptionProvider);
-
   return analysis;
 }
 
 async function runTranscriptionProcess(analysisId, youtubeUrl, provider) {
   try {
+    // 1. Transcription
     await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'TRANSCRIBING' } });
-    
-    let transcriptData;
-    if (provider === 'ASSEMBLY_AI') {
-      console.log(`Sélection du fournisseur réel: ${provider}`);
-      transcriptData = await getTranscriptFromAssemblyAI(youtubeUrl);
-    } else if (provider === 'MOCK_PROVIDER') {
-      console.log(`Sélection du fournisseur de test: ${provider}`);
-      transcriptData = await getTranscriptFromMockProvider();
-    } else {
-      throw new Error(`Fournisseur de transcription non supporté: "${provider}"`);
-    }
-    
-    await prisma.transcription.create({
+    const transcriptData = await getTranscriptFromProvider(provider, youtubeUrl);
+    const transcription = await prisma.transcription.create({
       data: {
         analysisId: analysisId,
         provider: provider,
         content: transcriptData.structured,
         fullText: transcriptData.fullText,
-      },
+      }
     });
 
+    // 2. Extraction des faits
+    await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'EXTRACTING_CLAIMS' } });
+    const claimsText = await claimExtractionService.extractClaimsFromText(transcription.fullText);
+    
+    console.log(`${claimsText.length} affirmations extraites. Sauvegarde en cours...`);
+    if (claimsText.length > 0) {
+      await prisma.claim.createMany({
+        data: claimsText.map(claimText => ({
+          analysisId: analysisId,
+          text: claimText,
+          timestamp: 0, // TODO: Approximer l'horodatage
+        })),
+      });
+    }
+
+    // 3. Terminé
     await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'COMPLETE' } });
-    console.log(`Transcription terminée pour l'analyse ${analysisId}. Processus marqué comme COMPLET.`);
+    console.log(`Analyse ${analysisId} terminée avec succès.`);
 
   } catch (error) {
     console.error(`Échec du processus pour l'analyse ${analysisId}:`, error.message);
