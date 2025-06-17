@@ -1,5 +1,7 @@
 const { OpenAI } = require('openai');
 const prisma = require('../client'); // On importe une instance partagée de Prisma
+const fs = require('fs');
+const path = require('path');
 
 // Configuration du client pour OpenRouter
 const openrouter = new OpenAI({
@@ -7,16 +9,10 @@ const openrouter = new OpenAI({
   apiKey: process.env.OPENROUTER_API_KEY, // Assurez-vous d'ajouter cette clé à votre .env
 });
 
-// Le "cerveau" de notre extracteur
-const SYSTEM_PROMPT = `
-Tu es un assistant de recherche objectif et méticuleux. Ta seule tâche est d'analyser le texte fourni et d'extraire toutes les affirmations factuelles qui peuvent être vérifiées.
-Ignore les opinions, les questions, les anecdotes personnelles et le langage subjectif.
-Concentre-toi sur les données concrètes : statistiques, noms, dates, événements, déclarations directes.
-Ta réponse doit être UNIQUEMENT un objet JSON valide, sans aucun texte explicatif avant ou après.
-Le JSON doit avoir une seule clé "claims", qui contient un tableau d'objets. Chaque objet représente une affirmation et doit avoir une seule clé "claim" contenant le texte de l'affirmation.
-Exemple de sortie : {"claims": [{"claim": "La Tour Eiffel a été achevée en 1889."}, {"claim": "La distance Terre-Lune est d'environ 384 400 km."}]}
-Si tu ne trouves aucune affirmation factuelle, retourne un tableau vide : {"claims": []}
-`;
+// --- CHARGEMENT DYNAMIQUE DU PROMPT ---
+// On lit le prompt depuis un fichier externe pour une modification facile.
+const promptPath = path.join(__dirname, '../prompts/claim_extraction.prompt.txt');
+const SYSTEM_PROMPT = fs.readFileSync(promptPath, 'utf-8');
 
 /**
  * Extrait les affirmations factuelles d'une transcription.
@@ -28,13 +24,18 @@ async function extractClaimsFromText(fullText) {
   // TODO: Implémenter une stratégie de découpage pour les textes longs.
   console.log('Envoi de la transcription au LLM pour extraction...');
 
+  // --- LECTURE DYNAMIQUE DU MODÈLE ---
+  // On lit le nom du modèle depuis les variables d'environnement, avec une valeur par défaut.
+  const model = process.env.OPENROUTER_MODEL || "mistralai/mistral-7b-instruct:free";
+  console.log(`Envoi de la transcription au LLM (Modèle: ${model}) pour extraction...`);
+
   const response = await openrouter.chat.completions.create({
-    model: "mistralai/mistral-7b-instruct:free",
+    model: model, // Utilisation de la variable
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: fullText }
     ],
-    response_format: { type: "json_object" }, // On force le LLM à répondre en JSON
+    response_format: { type: "json_object" },
   });
 
   const rawJson = response.choices[0].message.content;
@@ -55,4 +56,35 @@ async function extractClaimsFromText(fullText) {
   }
 }
 
-module.exports = { extractClaimsFromText };
+/**
+ * Simule l'extraction des "claims".
+ * @returns {Promise<Array<string>>} Un tableau d'affirmations simulées.
+ */
+async function mockExtractClaimsFromText() {
+  console.log('MOCK_CLAIM_EXTRACTOR: Démarrage de l\'extraction simulée.');
+  
+  // On cherche des affirmations ("claims") déjà existantes dans la base de données.
+  const existingClaims = await prisma.claim.findMany({ take: 10 }); // On en prend 10 pour l'exemple
+
+  if (existingClaims.length < 3) { // On s'assure d'avoir un minimum de données pour que le mock soit utile
+    console.warn("MOCK_CLAIM_EXTRACTOR: Pas assez de 'claims' en BDD. Retourne des données par défaut.");
+    return [
+      "Ceci est une première affirmation simulée.",
+      "Une deuxième affirmation de test est apparue.",
+      "La simulation est un succès."
+    ];
+  }
+
+  // On en choisit 3 au hasard pour simuler une réponse variable.
+  const shuffled = existingClaims.sort(() => 0.5 - Math.random());
+  const selectedClaims = shuffled.slice(0, 3).map(c => c.text);
+  
+  console.log(`MOCK_CLAIM_EXTRACTOR: Utilisation de ${selectedClaims.length} 'claims' existants.`);
+  await new Promise(resolve => setTimeout(resolve, 1500)); // Simule un délai de 1.5s pour le LLM
+
+  console.log('MOCK_CLAIM_EXTRACTOR: ✅ Extraction simulée terminée !');
+  return selectedClaims;
+}
+
+
+module.exports = { extractClaimsFromText, mockExtractClaimsFromText };
