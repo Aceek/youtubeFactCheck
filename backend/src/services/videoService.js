@@ -94,10 +94,17 @@ async function getTranscriptFromAssemblyAI(youtubeUrl) {
           const { status, error } = getResponse.data;
           if (status === "completed") {
             console.log("✅ Transcription terminée !");
+            
+            // On récupère les paragraphes pour un meilleur contexte
+            const paragraphResponse = await axios.get(
+                `${API_ENDPOINT}/transcript/${transcriptId}/paragraphs`,
+                { headers: { authorization: ASSEMBLYAI_API_KEY } }
+            );
 
             resolve({
               fullText: getResponse.data.text,
-              structured: getResponse.data.words,
+              words: getResponse.data.words,
+              paragraphs: paragraphResponse.data.paragraphs
             });
             return;
           } else if (status === "failed") {
@@ -165,9 +172,11 @@ async function getTranscriptFromMockProvider() {
   await sleep(3000); // Simule un délai de 3 secondes
 
   console.log("MOCK_PROVIDER: ✅ Transcription simulée terminée !");
+  // On s'assure que mockData.content contient bien { words, paragraphs }
   return {
     fullText: mockData.fullText,
-    structured: mockData.content,
+    words: mockData.content.words,
+    paragraphs: mockData.content.paragraphs
   };
 }
 
@@ -246,7 +255,8 @@ async function runFullProcess(analysisId, youtubeUrl, provider) {
       data: {
         analysisId: analysisId,
         provider: provider, // On utilise le provider original ici aussi
-        content: transcriptData.structured,
+        // On sauvegarde l'objet complet {fullText, words, paragraphs} dans `content`
+        content: transcriptData,
         fullText: transcriptData.fullText,
       }
     });
@@ -275,7 +285,12 @@ async function runClaimExtractionProcess(analysisId, transcription, provider) {
     if (provider === 'MOCK_PROVIDER') {
       claimsData = await claimExtractionService.mockExtractClaimsFromText();
     } else {
-      claimsData = await claimExtractionService.extractClaimsWithTimestamps(transcription.content);
+      // ON PASSE L'ID DE L'ANALYSE ET LE MODÈLE
+      claimsData = await claimExtractionService.extractClaimsWithTimestamps(
+        analysisId,
+        transcription.content,
+        currentLlmModel // <-- Pour le logging complet
+      );
     }
     
     console.log(`${claimsData.length} affirmations extraites avec le modèle ${currentLlmModel}.`);

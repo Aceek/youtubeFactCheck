@@ -21,7 +21,8 @@
     "express-validator": "^7.2.1",
     "inquirer": "^8.2.4",
     "openai": "^5.5.0",
-    "prisma": "^6.9.0"
+    "prisma": "^6.9.0",
+    "string-similarity": "^4.0.4"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
