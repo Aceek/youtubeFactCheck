@@ -3,7 +3,7 @@ const axios = require("axios");
 const { spawn } = require("child_process");
 const claimExtractionService = require("./claimExtractionService");
 
-const prisma = new PrismaClient();
+const prisma = require("../client"); // Utilisation du client partagé
 
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
 const API_ENDPOINT = "https://api.assemblyai.com/v2";
@@ -211,14 +211,14 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
         data: { videoId: videoId, status: 'PENDING' },
       });
       // On lance le processus d'extraction sur la transcription existante.
-      runClaimExtractionProcess(newAnalysis.id, lastAnalysis.transcription);
+      runClaimExtractionProcess(newAnalysis.id, lastAnalysis.transcription, transcriptionProvider);
       return newAnalysis;
     }
   } else {
     console.log('MOCK_PROVIDER sélectionné, le cache est ignoré.');
   }
   
-  console.log(`Cache MISS: Lancement d'un nouveau processus complet.`);
+  console.log(`Cache MISS ou ignoré: Lancement d'un nouveau processus complet.`);
 
   const video = await prisma.video.upsert({
     where: { id: videoId },
@@ -245,14 +245,13 @@ async function runFullProcess(analysisId, youtubeUrl, provider) {
     const transcription = await prisma.transcription.create({
       data: {
         analysisId: analysisId,
-        provider: provider,
+        provider: provider, // On utilise le provider original ici aussi
         content: transcriptData.structured,
         fullText: transcriptData.fullText,
       }
     });
 
-    // 2. On lance l'extraction des faits
-    await runClaimExtractionProcess(analysisId, transcription);
+    await runClaimExtractionProcess(analysisId, transcription, provider);
 
   } catch (error) {
     console.error(`Échec du processus complet pour l'analyse ${analysisId}:`, error.message);
@@ -264,20 +263,18 @@ async function runFullProcess(analysisId, youtubeUrl, provider) {
  * Processus partiel : Uniquement l'Extraction des Faits (pour la ré-analyse).
  * @param {number} analysisId - L'ID de la NOUVELLE analyse.
  * @param {object} transcription - La transcription EXISTANTE à analyser.
+ * @param {string} provider - Le fournisseur de transcription original de la requête.
  */
-async function runClaimExtractionProcess(analysisId, transcription) {
+async function runClaimExtractionProcess(analysisId, transcription, provider) {
   try {
-    const provider = transcription.provider; // On utilise le vrai provider de la transcription
     const currentLlmModel = process.env.OPENROUTER_MODEL || "mistralai/mistral-7b-instruct:free";
 
-    // ÉTAPE D'EXTRACTION
     await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'EXTRACTING_CLAIMS' } });
     
     let claimsData;
     if (provider === 'MOCK_PROVIDER') {
       claimsData = await claimExtractionService.mockExtractClaimsFromText();
     } else {
-      // On passe maintenant la transcription STRUCTURÉE
       claimsData = await claimExtractionService.extractClaimsWithTimestamps(transcription.content);
     }
     
@@ -287,7 +284,7 @@ async function runClaimExtractionProcess(analysisId, transcription) {
         data: claimsData.map(claim => ({
           analysisId: analysisId,
           text: claim.text,
-          timestamp: claim.timestamp, // <-- On sauvegarde le bon timestamp !
+          timestamp: claim.timestamp,
         })),
       });
     }
@@ -297,7 +294,7 @@ async function runClaimExtractionProcess(analysisId, transcription) {
       where: { id: analysisId },
       data: {
         status: 'COMPLETE',
-        llmModel: currentLlmModel, // <-- On sauvegarde le modèle
+        llmModel: currentLlmModel,
       }
     });
     console.log(`Analyse ${analysisId} terminée avec succès.`);

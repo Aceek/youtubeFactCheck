@@ -1,8 +1,8 @@
 const { OpenAI } = require('openai');
 const fs = require('fs');
 const path = require('path');
-// Le client Prisma n'est plus nécessaire ici
-// const prisma = require('../client');
+// --- CORRECTION : Le client Prisma EST nécessaire pour le service de MOCK ---
+const prisma = require('../client');
 
 const openrouter = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
@@ -71,31 +71,39 @@ async function extractClaimsWithTimestamps(structuredTranscript) {
  * Simule l'extraction des "claims".
  * @returns {Promise<Array<string>>} Un tableau d'affirmations simulées.
  */
+/**
+ * MODIFICATION : Simule l'extraction des "claims" avec des timestamps.
+ * @returns {Promise<Array<{text: string, timestamp: number}>>} Un tableau d'objets "claim" simulés.
+ */
 async function mockExtractClaimsFromText() {
   console.log('MOCK_CLAIM_EXTRACTOR: Démarrage de l\'extraction simulée.');
   
-  // On cherche des affirmations ("claims") déjà existantes dans la base de données.
-  const existingClaims = await prisma.claim.findMany({ take: 10 }); // On en prend 10 pour l'exemple
+  const defaultClaims = [
+    { text: "Ceci est une première affirmation simulée.", timestamp: 10 },
+    { text: "Une deuxième affirmation de test est apparue.", timestamp: 25 },
+    { text: "La simulation est un succès.", timestamp: 42 }
+  ];
 
-  if (existingClaims.length < 3) { // On s'assure d'avoir un minimum de données pour que le mock soit utile
+  const existingClaims = await prisma.claim.findMany({
+    take: 10,
+    where: { timestamp: { gt: 0 } } // On prend des 'claims' qui ont un vrai timestamp
+  });
+
+  if (existingClaims.length < 3) {
     console.warn("MOCK_CLAIM_EXTRACTOR: Pas assez de 'claims' en BDD. Retourne des données par défaut.");
-    return [
-      "Ceci est une première affirmation simulée.",
-      "Une deuxième affirmation de test est apparue.",
-      "La simulation est un succès."
-    ];
+    return defaultClaims;
   }
 
-  // On en choisit 3 au hasard pour simuler une réponse variable.
   const shuffled = existingClaims.sort(() => 0.5 - Math.random());
-  const selectedClaims = shuffled.slice(0, 3).map(c => c.text);
+  const selectedClaims = shuffled.slice(0, 3).map(c => ({ text: c.text, timestamp: c.timestamp }));
   
   console.log(`MOCK_CLAIM_EXTRACTOR: Utilisation de ${selectedClaims.length} 'claims' existants.`);
-  await new Promise(resolve => setTimeout(resolve, 1500)); // Simule un délai de 1.5s pour le LLM
+  await new Promise(resolve => setTimeout(resolve, 1500));
 
   console.log('MOCK_CLAIM_EXTRACTOR: ✅ Extraction simulée terminée !');
+
   return selectedClaims;
 }
 
 
-module.exports = { extractClaimsWithTimestamps, mockExtractClaimsFromText: () => Promise.resolve([]) };
+module.exports = { extractClaimsWithTimestamps, mockExtractClaimsFromText };
