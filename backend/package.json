@@ -19,6 +19,7 @@
     "express": "^5.1.0",
     "express-rate-limit": "^7.5.0",
     "express-validator": "^7.2.1",
+    "inquirer": "^8.2.4",
     "openai": "^5.5.0",
     "prisma": "^6.9.0"
   },
