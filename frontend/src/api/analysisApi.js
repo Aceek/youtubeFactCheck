@@ -25,3 +25,15 @@ export async function fetchAnalysis(id) {
   }
   return data;
 }
+
+export async function reRunClaims(id) {
+  const response = await fetch(`${API_URL}/analyses/${id}/rerun-claim-extraction`, {
+    method: 'POST',
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || `Erreur ${response.status}`);
+  }
+  return data;
+}

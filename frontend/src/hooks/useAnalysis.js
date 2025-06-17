@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { createAnalysis, fetchAnalysis } from '../api/analysisApi';
+import { createAnalysis, fetchAnalysis, reRunClaims } from '../api/analysisApi'; // Importer reRunClaims
 
 export function useAnalysis() {
   const [analysis, setAnalysis] = useState(null);
@@ -58,10 +58,26 @@ export function useAnalysis() {
     }
   }, [pollAnalysis]);
 
-  // Nettoyage de l'intervalle si le composant est démonté
-  useEffect(() => {
-    return () => stopPolling();
-  }, []);
+  // --- NOUVELLE FONCTION ---
+  const rerunClaimExtraction = useCallback(async (id) => {
+    stopPolling();
+    setIsLoading(true);
+    setError(null);
+    try {
+      const updatedAnalysis = await reRunClaims(id);
+      setAnalysis(updatedAnalysis);
+      // On relance le polling pour suivre la nouvelle progression
+      pollingIntervalRef.current = setInterval(() => {
+        pollAnalysis(id);
+      }, 5000);
+    } catch (err) {
+      setError(err.message);
+      setIsLoading(false);
+    }
+  }, [pollAnalysis]);
 
-  return { analysis, isLoading, error, startAnalysis };
+  useEffect(() => { return () => stopPolling(); }, []);
+
+  // On exporte la nouvelle fonction
+  return { analysis, isLoading, error, startAnalysis, rerunClaimExtraction };
 }

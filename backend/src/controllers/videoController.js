@@ -25,4 +25,15 @@ async function getAnalysis(req, res, next) {
   }
 }
 
-module.exports = { createAnalysis, getAnalysis };
+// --- NOUVEAU CONTRÔLEUR ---
+async function rerunClaimExtraction(req, res, next) {
+  const { id } = req.params;
+  try {
+    const analysis = await videoService.rerunClaimExtraction(parseInt(id, 10));
+    res.status(202).json(analysis); // 202 Accepted: la tâche est lancée
+  } catch (error) {
+    next(error);
+  }
+}
+
+module.exports = { createAnalysis, getAnalysis, rerunClaimExtraction };

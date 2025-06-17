@@ -305,4 +305,40 @@ async function runClaimExtractionProcess(analysisId, transcription, provider) {
   }
 }
 
-module.exports = { startAnalysis, getAnalysisById };
+/**
+ * NOUVELLE FONCTION : Relance uniquement l'extraction des "claims".
+ * @param {number} analysisId - L'ID de l'analyse à relancer.
+ * @returns {object} La nouvelle analyse mise à jour.
+ */
+async function rerunClaimExtraction(analysisId) {
+  console.log(`RE-ANALYSE manuelle des claims pour l'analyse ID: ${analysisId}`);
+  
+  const analysisToRerun = await prisma.analysis.findUnique({
+    where: { id: analysisId },
+    include: { transcription: true },
+  });
+
+  if (!analysisToRerun || !analysisToRerun.transcription) {
+    throw new Error("Impossible de relancer : l'analyse ou sa transcription n'existe pas.");
+  }
+  
+  // 1. On efface les anciens "claims" pour éviter les doublons.
+  await prisma.claim.deleteMany({
+    where: { analysisId: analysisId },
+  });
+
+  // 2. On met à jour le statut pour que le frontend réagisse.
+  const updatedAnalysis = await prisma.analysis.update({
+    where: { id: analysisId },
+    data: { status: 'PENDING' } // On le repasse en 'pending' avant de lancer le processus
+  });
+
+  // 3. On lance le processus d'extraction en arrière-plan.
+  // On passe le provider de la transcription existante pour que le mock fonctionne.
+  runClaimExtractionProcess(analysisId, analysisToRerun.transcription, analysisToRerun.transcription.provider);
+
+  return updatedAnalysis;
+}
+
+// On exporte la nouvelle fonction
+module.exports = { startAnalysis, getAnalysisById, rerunClaimExtraction };

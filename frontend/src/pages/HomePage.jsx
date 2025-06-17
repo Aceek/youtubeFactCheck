@@ -5,26 +5,37 @@ import AnalysisStatus from '../components/analysis/AnalysisStatus';
 import { useAnalysis } from '../hooks/useAnalysis';
 
 function HomePage() {
-  const { analysis, isLoading, error, startAnalysis } = useAnalysis();
-  const [player, setPlayer] = useState(null); // État pour stocker l'objet lecteur
+  const { analysis, isLoading, error, startAnalysis, rerunClaimExtraction } = useAnalysis();
+  const [player, setPlayer] = useState(null);
+  const [playerKey, setPlayerKey] = useState(0); // <-- NOUVEL ÉTAT
 
   const isProcessing = isLoading || (analysis && analysis.status !== 'COMPLETE' && analysis.status !== 'FAILED');
 
-  // Fonction pour stocker le lecteur une fois qu'il est prêt
+  const handleRerun = () => {
+    if (analysis) {
+      rerunClaimExtraction(analysis.id);
+    }
+  };
+
   const handlePlayerReady = (eventTarget) => {
     setPlayer(eventTarget);
   };
 
-  // Fonction pour avancer la vidéo, passée aux enfants
   const handleClaimClick = (timestamp) => {
     if (player) {
-      player.seekTo(timestamp); // L'API YouTube pour avancer la vidéo
+      player.seekTo(timestamp);
       player.playVideo();
     }
   };
 
+  // --- NOUVELLE FONCTION ---
+  const handleReloadPlayer = () => {
+    setPlayer(null); // On réinitialise l'instance du player
+    setPlayerKey(prevKey => prevKey + 1); // On change la clé pour forcer le re-montage
+  };
+
   return (
-    <div className="max-w-4xl mx-auto space-y-8"> {/* J'ai un peu élargi le conteneur */}
+    <div className="max-w-4xl mx-auto space-y-8">
       <AnalysisForm onSubmit={startAnalysis} isLoading={isLoading} />
       
       {error && (
@@ -39,8 +50,12 @@ function HomePage() {
       {analysis && analysis.status === 'COMPLETE' && (
         <AnalysisResult
           analysis={analysis}
+          playerKey={playerKey} // On passe la clé
           onPlayerReady={handlePlayerReady}
           onClaimClick={handleClaimClick}
+          onRerunClaims={handleRerun} // On passe la fonction
+          onReloadPlayer={handleReloadPlayer} // On passe la fonction de rechargement
+          isProcessing={isProcessing} // Et l'état de chargement
         />
       )}
     </div>
