@@ -273,14 +273,39 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
   const videoId = extractVideoId(youtubeUrl);
   if (!videoId) throw new Error('URL YouTube invalide.');
 
-  // --- NOUVELLE LOGIQUE DE CACHE ET DE RE-ANALYSE ---
-  // On récupère le nom du modèle LLM actuel depuis l'environnement.
   const currentLlmModel = process.env.OPENROUTER_MODEL || "mistralai/mistral-7b-instruct:free";
 
-  if (transcriptionProvider !== 'MOCK_PROVIDER') {
-    // On cherche la dernière analyse complète pour cette vidéo.
+  // --- CORRECTION MAJEURE : SÉPARATION DES LOGIQUES MOCK ET RÉELLE ---
+  if (transcriptionProvider === 'MOCK_PROVIDER') {
+    // ---- LOGIQUE POUR LE MOCK ----
+    console.log('MOCK_PROVIDER sélectionné. Lancement d\'un processus complet simulé.');
+    
+    const video = await prisma.video.upsert({
+      where: { id: videoId },
+      update: {},
+      create: { id: videoId, youtubeUrl },
+    });
+    const analysis = await prisma.analysis.create({
+      data: { videoId: video.id, status: 'PENDING' },
+    });
+    
+    // On lance le processus complet, mais la fonction getTranscriptFromProvider
+    // saura qu'elle doit utiliser la version simulée.
+    runFullProcess(analysis.id, youtubeUrl, transcriptionProvider);
+    
+    const initialAnalysisWithVideo = { ...analysis, video: video };
+    return { analysis: initialAnalysisWithVideo, fromCache: false };
+
+  } else {
+    // ---- LOGIQUE POUR L'ANALYSE RÉELLE (ASSEMBLY_AI) ----
+
+    // 1. On cherche la dernière analyse RÉELLE complète (on ignore les mocks).
     const lastAnalysis = await prisma.analysis.findFirst({
-      where: { videoId: videoId, status: 'COMPLETE' },
+      where: {
+        videoId: videoId,
+        status: 'COMPLETE',
+        llmModel: { not: 'MOCK_PROVIDER' } // <-- Condition clé pour ignorer les mocks
+      },
       orderBy: { createdAt: 'desc' },
       include: {
         transcription: true,
@@ -290,46 +315,40 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
     });
 
     if (lastAnalysis) {
-      // Si le modèle utilisé est le même que le modèle actuel, on renvoie le cache.
+      // 2. Si on trouve une analyse réelle, on vérifie le modèle LLM.
       if (lastAnalysis.llmModel === currentLlmModel) {
-        console.log(`Cache HIT: Analyse complète trouvée (ID: ${lastAnalysis.id}).`);
-        // --- FIX #1 : On renvoie un objet explicite ---
+        console.log(`Cache HIT: Analyse réelle complète trouvée (ID: ${lastAnalysis.id}).`);
         return { analysis: lastAnalysis, fromCache: true };
       }
       
-      console.log(`RE-ANALYSE: Le modèle LLM a changé...`);
+      // 3. Le modèle a changé, on lance une RE-ANALYSE basée sur la transcription réelle.
+      console.log(`RE-ANALYSE: Le modèle LLM a changé de "${lastAnalysis.llmModel}" à "${currentLlmModel}".`);
       const newAnalysis = await prisma.analysis.create({
         data: { videoId: videoId, status: 'PENDING' },
       });
+      
       runClaimExtractionProcess(newAnalysis.id, lastAnalysis.transcription, transcriptionProvider);
       
       const newAnalysisWithVideo = { ...newAnalysis, video: lastAnalysis.video };
       return { analysis: newAnalysisWithVideo, fromCache: false };
     }
-  } else {
-    console.log('MOCK_PROVIDER sélectionné, le cache est ignoré.');
+
+    // 4. Si aucune analyse réelle n'est trouvée, on lance un nouveau processus complet.
+    console.log(`Cache MISS: Lancement d'un nouveau processus réel complet.`);
+    const video = await prisma.video.upsert({
+      where: { id: videoId },
+      update: {},
+      create: { id: videoId, youtubeUrl },
+    });
+    const analysis = await prisma.analysis.create({
+      data: { videoId: video.id, status: 'PENDING' },
+    });
+    
+    runFullProcess(analysis.id, youtubeUrl, transcriptionProvider);
+    
+    const initialAnalysisWithVideo = { ...analysis, video: video };
+    return { analysis: initialAnalysisWithVideo, fromCache: false };
   }
-  
-  console.log(`Cache MISS ou ignoré: Lancement d'un nouveau processus complet.`);
-
-  const video = await prisma.video.upsert({
-    where: { id: videoId },
-    update: {},
-    create: { id: videoId, youtubeUrl },
-  });
-  const analysis = await prisma.analysis.create({
-    data: { videoId: video.id, status: 'PENDING' },
-  });
-  
-  // CORRECTION : Utilisation de la variable 'transcriptionProvider' correcte
-  runFullProcess(analysis.id, youtubeUrl, transcriptionProvider);
-  
-  const initialAnalysisWithVideo = {
-    ...analysis,
-    video: video
-  };
-
-  return { analysis: initialAnalysisWithVideo, fromCache: false };
 }
 
 /**
