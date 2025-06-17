@@ -282,24 +282,29 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
     const lastAnalysis = await prisma.analysis.findFirst({
       where: { videoId: videoId, status: 'COMPLETE' },
       orderBy: { createdAt: 'desc' },
-      include: { transcription: true, claims: true },
+      include: {
+        transcription: true,
+        claims: true,
+        video: true
+      },
     });
 
     if (lastAnalysis) {
       // Si le modèle utilisé est le même que le modèle actuel, on renvoie le cache.
       if (lastAnalysis.llmModel === currentLlmModel) {
-        console.log(`Cache HIT: Analyse complète trouvée (ID: ${lastAnalysis.id}) avec le même LLM (${currentLlmModel}). Renvoi du résultat existant.`);
-        return lastAnalysis;
+        console.log(`Cache HIT: Analyse complète trouvée (ID: ${lastAnalysis.id}).`);
+        // --- FIX #1 : On renvoie un objet explicite ---
+        return { analysis: lastAnalysis, fromCache: true };
       }
       
-      // SINON, le modèle a changé ! On lance une RE-ANALYSE.
-      console.log(`RE-ANALYSE: Le modèle LLM a changé de "${lastAnalysis.llmModel}" à "${currentLlmModel}".`);
+      console.log(`RE-ANALYSE: Le modèle LLM a changé...`);
       const newAnalysis = await prisma.analysis.create({
         data: { videoId: videoId, status: 'PENDING' },
       });
-      // On lance le processus d'extraction sur la transcription existante.
       runClaimExtractionProcess(newAnalysis.id, lastAnalysis.transcription, transcriptionProvider);
-      return newAnalysis;
+      
+      const newAnalysisWithVideo = { ...newAnalysis, video: lastAnalysis.video };
+      return { analysis: newAnalysisWithVideo, fromCache: false };
     }
   } else {
     console.log('MOCK_PROVIDER sélectionné, le cache est ignoré.');
@@ -316,9 +321,15 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
     data: { videoId: video.id, status: 'PENDING' },
   });
   
-  // Le processus complet (transcription + extraction)
+  // CORRECTION : Utilisation de la variable 'transcriptionProvider' correcte
   runFullProcess(analysis.id, youtubeUrl, transcriptionProvider);
-  return analysis;
+  
+  const initialAnalysisWithVideo = {
+    ...analysis,
+    video: video
+  };
+
+  return { analysis: initialAnalysisWithVideo, fromCache: false };
 }
 
 /**
@@ -447,7 +458,10 @@ async function rerunClaimExtraction(analysisId) {
   
   const analysisToRerun = await prisma.analysis.findUnique({
     where: { id: analysisId },
-    include: { transcription: true },
+    include: {
+      transcription: true,
+      video: true
+    },
   });
 
   if (!analysisToRerun || !analysisToRerun.transcription) {
@@ -469,7 +483,12 @@ async function rerunClaimExtraction(analysisId) {
   // On passe le provider de la transcription existante pour que le mock fonctionne.
   runClaimExtractionProcess(analysisId, analysisToRerun.transcription, analysisToRerun.transcription.provider);
 
-  return updatedAnalysis;
+  // On attache les métadonnées pour que l'UI se mette à jour instantanément
+  const updatedAnalysisWithVideo = {
+    ...updatedAnalysis,
+    video: analysisToRerun.video
+  };
+  return updatedAnalysisWithVideo;
 }
 
 // On exporte la nouvelle fonction

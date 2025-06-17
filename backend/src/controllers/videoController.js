@@ -5,8 +5,16 @@ async function createAnalysis(req, res, next) {
   const { youtubeUrl, transcriptionProvider } = req.body;
   
   try {
-    const initialAnalysis = await videoService.startAnalysis(youtubeUrl, transcriptionProvider);
-    res.status(202).json(initialAnalysis);
+    // Le service retourne maintenant un objet { analysis, fromCache }
+    const result = await videoService.startAnalysis(youtubeUrl, transcriptionProvider);
+
+    if (result.fromCache) {
+      // --- FIX #3 : Si c'est du cache, on renvoie 200 OK avec les données finales ---
+      res.status(200).json(result.analysis);
+    } else {
+      // --- Sinon, on renvoie 202 Accepted pour lancer le polling ---
+      res.status(202).json(result.analysis);
+    }
   } catch (error) {
     next(error);
   }
