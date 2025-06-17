@@ -19,3 +19,4 @@ postgres-data/
 # Logs and temp files
 *.log
 .DS_Store
+results/
