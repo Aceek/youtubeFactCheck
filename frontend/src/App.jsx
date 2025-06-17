@@ -9,7 +9,7 @@ function App() {
           <p className="text-sm text-gray-400">Analyse et vérification des faits des vidéos YouTube</p>
         </div>
       </header>
-      <main className="container mx-auto px-4 py-8">
+      <main className="mx-auto px-4 lg:px-8 py-8">
         <HomePage />
       </main>
        <footer className="text-center p-4 text-gray-500 text-xs mt-auto">
