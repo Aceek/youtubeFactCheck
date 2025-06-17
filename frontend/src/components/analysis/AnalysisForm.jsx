@@ -1,14 +1,35 @@
 import { useState } from 'react';
 import LoadingSpinner from '../common/LoadingSpinner';
 
+const YOUTUBE_URL_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/;
+
 function AnalysisForm({ onSubmit, isLoading }) {
   const [url, setUrl] = useState('');
-  // On réintroduit le choix et on met le MOCK par défaut pour faciliter les tests.
   const [provider, setProvider] = useState('MOCK_PROVIDER');
+  const [formError, setFormError] = useState(''); // État pour l'erreur de validation du formulaire
+
+  const handleUrlChange = (e) => {
+    const newUrl = e.target.value;
+    setUrl(newUrl);
+    // On efface l'erreur dès que l'utilisateur modifie l'URL
+    if (formError) {
+      setFormError('');
+    }
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!url.trim()) return;
+    // Validation côté frontend pour une meilleure UX
+    if (!url.trim()) {
+      setFormError('Veuillez saisir une URL.');
+      return;
+    }
+    if (!YOUTUBE_URL_REGEX.test(url)) {
+      setFormError('L\'URL ne semble pas être une URL YouTube valide.');
+      return;
+    }
+    
+    setFormError(''); // On efface toute erreur précédente
     onSubmit(url, provider);
   };
 
@@ -25,9 +46,12 @@ function AnalysisForm({ onSubmit, isLoading }) {
                 id="youtube-url"
                 type="text"
                 value={url}
-                onChange={(e) => setUrl(e.target.value)}
+                onChange={handleUrlChange}
                 placeholder="https://www.youtube.com/watch?v=..."
-                className="flex-grow p-3 bg-gray-900 border border-gray-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none transition"
+                // On ajoute une bordure rouge si le champ est en erreur
+                className={`flex-grow p-3 bg-gray-900 border rounded-md focus:ring-2 focus:outline-none transition ${
+                  formError ? 'border-red-500 ring-red-500' : 'border-gray-600 focus:ring-cyan-500'
+                }`}
                 required
               />
               <button
@@ -38,6 +62,8 @@ function AnalysisForm({ onSubmit, isLoading }) {
                 {isLoading ? <LoadingSpinner /> : 'Lancer'}
               </button>
             </div>
+            {/* Affichage de l'erreur de validation directement sous le champ */}
+            {formError && <p className="text-red-400 text-sm mt-2">{formError}</p>}
           </div>
 
           <fieldset>
