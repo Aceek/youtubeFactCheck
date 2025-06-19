@@ -1,9 +1,20 @@
 const { OpenAI } = require('openai');
 const fs = require('fs');
 const path = require('path');
-const { extractJsonFromString } = require('../utils/jsonUtils'); // Assurez-vous que ce chemin est correct
+// Idéalement, à déplacer dans un fichier utils/jsonUtils.js et importer
+function extractJsonFromString(str) {
+    if (!str || typeof str !== 'string') return null;
+    const firstBrace = str.indexOf('{');
+    const lastBrace = str.lastIndexOf('}');
+    if (firstBrace === -1 || lastBrace === -1 || lastBrace < firstBrace) return null;
+    return str.substring(firstBrace, lastBrace + 1);
+}
 
-const openrouter = new OpenAI({ /* ... */ });
+const openrouter = new OpenAI({
+  baseURL: "https://openrouter.ai/api/v1",
+  apiKey: process.env.OPENROUTER_API_KEY,
+});
+
 const promptPath = path.join(__dirname, '../prompts/claim_validation.prompt.txt');
 const SYSTEM_PROMPT = fs.readFileSync(promptPath, 'utf-8');
 
@@ -24,6 +35,9 @@ async function validateClaim(claim, paragraphs) {
     });
     const rawJson = response.choices[0].message.content;
     const cleanedJson = extractJsonFromString(rawJson);
+    if (!cleanedJson) {
+        throw new Error("Impossible d'extraire un objet JSON de la réponse du LLM de validation.");
+    }
     const result = JSON.parse(cleanedJson);
     return {
       validationStatus: result.validation_status,
