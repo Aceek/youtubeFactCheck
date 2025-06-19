@@ -2,6 +2,7 @@ const { PrismaClient } = require("@prisma/client");
 const axios = require("axios");
 const { spawn } = require("child_process");
 const claimExtractionService = require("./claimExtractionService");
+const claimValidationService = require("./claimValidationService"); // <-- NOUVEL IMPORT
 const fs = require('fs');
 const path = require('path');
 
@@ -270,8 +271,9 @@ async function getAnalysisById(id) {
   });
 }
 
-async function startAnalysis(youtubeUrl, transcriptionProvider) {
-  console.log(`Début de l'analyse pour l'URL: ${youtubeUrl} avec le fournisseur: ${transcriptionProvider}`);
+// Passez le paramètre 'withValidation' à travers les fonctions
+async function startAnalysis(youtubeUrl, transcriptionProvider, withValidation) {
+  console.log(`Début de l'analyse pour l'URL: ${youtubeUrl} avec le fournisseur: ${transcriptionProvider}, validation: ${withValidation}`);
   const videoId = extractVideoId(youtubeUrl);
   if (!videoId) throw new Error('URL YouTube invalide.');
 
@@ -293,7 +295,7 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
     
     // On lance le processus complet, mais la fonction getTranscriptFromProvider
     // saura qu'elle doit utiliser la version simulée.
-    runFullProcess(analysis.id, youtubeUrl, transcriptionProvider);
+    runFullProcess(analysis.id, youtubeUrl, transcriptionProvider, withValidation); // <-- PASSER withValidation
     
     const initialAnalysisWithVideo = { ...analysis, video: video };
     return { analysis: initialAnalysisWithVideo, fromCache: false };
@@ -322,6 +324,8 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
       // 2. Si on trouve une analyse réelle, on vérifie le modèle LLM.
       if (lastAnalysis.llmModel === currentLlmModel) {
         console.log(`Cache HIT: Analyse réelle complète trouvée (ID: ${lastAnalysis.id}).`);
+        // Si on a trouvé une analyse en cache, on ne relance pas la validation ici.
+        // La validation sera lancée si l'utilisateur clique sur le bouton de re-validation.
         return { analysis: lastAnalysis, fromCache: true };
       }
       
@@ -331,7 +335,8 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
         data: { videoId: videoId, status: 'PENDING' },
       });
       
-      runClaimExtractionProcess(newAnalysis.id, lastAnalysis.transcription, transcriptionProvider);
+      // Lors d'une ré-analyse due au changement de modèle, on lance toujours la validation
+      runClaimExtractionProcess(newAnalysis.id, lastAnalysis.transcription, transcriptionProvider, true); // <-- PASSER true pour withValidation
       
       const newAnalysisWithVideo = { ...newAnalysis, video: lastAnalysis.video };
       return { analysis: newAnalysisWithVideo, fromCache: false };
@@ -348,7 +353,7 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
       data: { videoId: video.id, status: 'PENDING' },
     });
     
-    runFullProcess(analysis.id, youtubeUrl, transcriptionProvider);
+    runFullProcess(analysis.id, youtubeUrl, transcriptionProvider, withValidation); // <-- PASSER withValidation
     
     const initialAnalysisWithVideo = { ...analysis, video: video };
     return { analysis: initialAnalysisWithVideo, fromCache: false };
@@ -362,7 +367,11 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
  * Processus complet : Métadonnées -> Transcription -> Extraction.
  * Gère les erreurs de manière plus granulaire.
  */
-async function runFullProcess(analysisId, youtubeUrl, provider) {
+/**
+ * Processus complet : Métadonnées -> Transcription -> Extraction -> Validation (conditionnelle).
+ * Gère les erreurs de manière plus granulaire.
+ */
+async function runFullProcess(analysisId, youtubeUrl, provider, withValidation) { // <-- AJOUT du paramètre withValidation
     // --- ÉTAPE 1: RÉCUPÉRATION DES MÉTADONNÉES (NON-BLOQUANTE) ---
     try {
         await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'FETCHING_METADATA' } });
@@ -403,9 +412,9 @@ async function runFullProcess(analysisId, youtubeUrl, provider) {
             }
         });
 
-        // --- ÉTAPE 3: EXTRACTION DES CLAIMS (BLOQUANTE) ---
+        // --- ÉTAPE 3: EXTRACTION ET VALIDATION DES CLAIMS (BLOQUANTE) ---
         // Le reste du processus est lancé depuis ici
-        await runClaimExtractionProcess(analysisId, transcription, provider);
+        await runClaimExtractionProcess(analysisId, transcription, provider, withValidation); // <-- PASSER withValidation
 
     } catch (criticalError) {
         // Si la transcription ou l'extraction échoue, c'est une erreur critique.
@@ -423,7 +432,14 @@ async function runFullProcess(analysisId, youtubeUrl, provider) {
  * @param {object} transcription - La transcription EXISTANTE à analyser.
  * @param {string} provider - Le fournisseur de transcription original de la requête.
  */
-async function runClaimExtractionProcess(analysisId, transcription, provider) {
+/**
+ * Processus partiel : Uniquement l'Extraction des Faits (pour la ré-analyse).
+ * @param {number} analysisId - L'ID de la NOUVELLE analyse.
+ * @param {object} transcription - La transcription EXISTANTE à analyser.
+ * @param {string} provider - Le fournisseur de transcription original de la requête.
+ * @param {boolean} withValidation - Indique si la validation doit être exécutée après l'extraction.
+ */
+async function runClaimExtractionProcess(analysisId, transcription, provider, withValidation) { // <-- AJOUT du paramètre withValidation
   try {
     // MODIFICATION : Le modèle dépend maintenant du provider
     const currentLlmModel = provider === 'MOCK_PROVIDER'
@@ -454,19 +470,36 @@ async function runClaimExtractionProcess(analysisId, transcription, provider) {
       });
     }
 
-    // TERMINÉ : On met à jour le statut ET le nom du modèle utilisé.
-    // L'analyse mock aura maintenant "MOCK_PROVIDER" comme llmModel.
+    // --- NOUVELLE ÉTAPE : VALIDATION CONDITIONNELLE ---
+    if (withValidation) {
+      await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'VALIDATING_CLAIMS' } });
+      const createdClaims = await prisma.claim.findMany({ where: { analysisId } });
+      console.log(`Lancement de la validation pour ${createdClaims.length} affirmations...`);
+      
+      const validationPromises = createdClaims.map(claim =>
+        claimValidationService.validateClaim(claim, transcription.content.paragraphs)
+          .then(result => prisma.claim.update({
+            where: { id: claim.id },
+            data: {
+              validationStatus: result.validationStatus,
+              validationExplanation: result.explanation,
+              validationScore: result.validationScore,
+            }
+          }))
+      );
+      await Promise.all(validationPromises);
+      console.log("✅ Validation terminée.");
+    }
+    
+    // On met à jour le statut final
     await prisma.analysis.update({
       where: { id: analysisId },
-      data: {
-        status: 'COMPLETE',
-        llmModel: currentLlmModel,
-      }
+      data: { status: 'COMPLETE', llmModel: currentLlmModel }
     });
     console.log(`Analyse ${analysisId} terminée avec succès.`);
 
   } catch (error) {
-    console.error(`Échec du processus d'extraction pour l'analyse ${analysisId}:`, error.message);
+    console.error(`Échec du processus d'extraction ou de validation pour l'analyse ${analysisId}:`, error.message);
     await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'FAILED' } });
   }
 }

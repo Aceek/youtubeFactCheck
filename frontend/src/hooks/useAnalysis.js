@@ -32,14 +32,15 @@ export function useAnalysis() {
     }
   }, []);
 
-  const startAnalysis = useCallback(async (url, provider) => {
+  const startAnalysis = useCallback(async (url, provider, withValidation) => { // Ajout du paramètre
     stopPolling();
     setIsLoading(true); // Seul le chargement initial utilise cet état
     setError(null);
     setAnalysis(null);
 
     try {
-      const initialAnalysis = await createAnalysis(url, provider);
+      // On passe le paramètre à l'appel API
+      const initialAnalysis = await createAnalysis(url, provider, withValidation);
       setAnalysis(initialAnalysis);
 
       if (initialAnalysis.status === 'COMPLETE') {

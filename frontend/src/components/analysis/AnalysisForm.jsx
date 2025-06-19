@@ -6,7 +6,8 @@ const YOUTUBE_URL_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/
 function AnalysisForm({ onSubmit, isLoading }) {
   const [url, setUrl] = useState('');
   const [provider, setProvider] = useState('MOCK_PROVIDER');
-  const [formError, setFormError] = useState(''); // État pour l'erreur de validation du formulaire
+  const [formError, setFormError] = useState('');
+  const [runValidation, setRunValidation] = useState(false); // <-- NOUVEL ÉTAT
 
   const handleUrlChange = (e) => {
     const newUrl = e.target.value;
@@ -30,7 +31,7 @@ function AnalysisForm({ onSubmit, isLoading }) {
     }
     
     setFormError(''); // On efface toute erreur précédente
-    onSubmit(url, provider);
+    onSubmit(url, provider, runValidation); // <-- PASSER LE NOUVEL ÉTAT
   };
 
   return (
@@ -98,6 +99,27 @@ function AnalysisForm({ onSubmit, isLoading }) {
             </div>
           </div>
         </fieldset>
+
+        {/* Ajoutez ce bloc à l'intérieur de la balise <form> */}
+        <div className="flex items-center justify-start pt-2">
+          <label htmlFor="validation-toggle" className="flex items-center cursor-pointer">
+            <div className="relative">
+              <input
+                id="validation-toggle"
+                type="checkbox"
+                className="sr-only"
+                checked={runValidation}
+                onChange={() => setRunValidation(!runValidation)}
+              />
+              <div className="block bg-gray-600 w-14 h-8 rounded-full"></div>
+              <div className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform ${runValidation ? 'translate-x-6 bg-cyan-400' : ''}`}></div>
+            </div>
+            <div className="ml-3 text-gray-200 font-medium">
+              Activer la validation des affirmations <span className="text-xs text-gray-400">(plus lent)</span>
+            </div>
+          </label>
+        </div>
+        {/* ... */}
       </form>
     </div>
   );

@@ -1,4 +1,21 @@
-import React, { useMemo, useRef, useEffect } from "react";
+import React, { useMemo, useRef, useEffect } from 'react';
+
+// Icônes de statut
+const ValidationIcon = ({ status, explanation }) => {
+  const icons = {
+    VALID: { icon: '✅', color: 'border-green-500', title: 'Valide' },
+    INACCURATE: { icon: '⚠️', color: 'border-yellow-500', title: 'Imprécis' },
+    OUT_OF_CONTEXT: { icon: '🔎', color: 'border-orange-500', title: 'Hors contexte' },
+    HALLUCINATION: { icon: '👻', color: 'border-red-500', title: 'Hallucination' },
+    UNVERIFIED: { icon: '…', color: 'border-gray-500', title: 'Non vérifié' },
+  };
+  const current = icons[status] || icons.UNVERIFIED;
+  return (
+    <span className="text-xl" title={`${current.title}: ${explanation || ''}`}>
+      {current.icon}
+    </span>
+  );
+};
 
 function ClaimList({ claims, onClaimClick, currentTime }) {
   // --- NOUVEAU : Référence pour le conteneur scrollable (la liste <ul>) ---
@@ -44,6 +61,16 @@ function ClaimList({ claims, onClaimClick, currentTime }) {
     }
   }, [activeClaimId]);
 
+  const getBorderColor = (status) => {
+    switch (status) {
+      case 'VALID': return 'border-green-500/80';
+      case 'INACCURATE': return 'border-yellow-500/80';
+      case 'OUT_OF_CONTEXT': return 'border-orange-500/80';
+      case 'HALLUCINATION': return 'border-red-500/80';
+      default: return 'border-fuchsia-500';
+    }
+  };
+  
   if (!claims || claims.length === 0) {
     return (
       <div className="text-center text-cyan-200/70 p-8 border-2 border-dashed border-cyan-400/20 rounded-xl bg-black/20">
@@ -67,6 +94,8 @@ function ClaimList({ claims, onClaimClick, currentTime }) {
       >
         {claims.map((claim) => {
           const isActive = claim.id === activeClaimId;
+          const borderColor = getBorderColor(claim.validationStatus);
+          
           return (
             <li
               // On assigne dynamiquement les références à chaque élément
@@ -74,24 +103,20 @@ function ClaimList({ claims, onClaimClick, currentTime }) {
               key={claim.id}
               onClick={() => onClaimClick(claim.timestamp)}
               className={`
-                p-5 border-l-4 rounded-r-lg shadow-lg  
+                p-5 border-l-4 rounded-r-lg shadow-lg
                 transition-all duration-300 cursor-pointer group
-                ${
-                  isActive
-                    ? "bg-cyan-900/50 border-cyan-400 scale-105 shadow-cyan-500/20"
-                    : "bg-gray-900/50 border-fuchsia-500 hover:bg-gray-800/70 hover:shadow-fuchsia-500/20"
+                ${isActive
+                  ? 'bg-cyan-900/50 !border-cyan-400 scale-105 shadow-cyan-500/20' // !border-cyan-400 pour forcer la couleur si actif
+                  : `bg-gray-900/50 ${borderColor} hover:bg-gray-800/70`
                 }
               `}
             >
-              <p
-                className={`text-lg transition-colors ${
-                  isActive
-                    ? "text-white"
-                    : "text-gray-200 group-hover:text-white"
-                }`}
-              >
-                "{claim.text}"
-              </p>
+              <div className="flex justify-between items-start gap-4">
+                <p className={`text-lg transition-colors flex-1 ${isActive ? 'text-white' : 'text-gray-200 group-hover:text-white'}`}>
+                  "{claim.text}"
+                </p>
+                <ValidationIcon status={claim.validationStatus} explanation={claim.validationExplanation} />
+              </div>
               <div className="text-right mt-3">
                 <span
                   className={`text-sm font-mono px-2 py-1 rounded transition-colors ${

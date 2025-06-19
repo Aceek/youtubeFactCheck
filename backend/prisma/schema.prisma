@@ -63,9 +63,15 @@ model Claim {
   analysis        Analysis @relation(fields: [analysisId], references: [id])
   analysisId      Int
   text            String   @db.Text
-  timestamp       Float    // Le moment où l'affirmation est faite dans la vidéo (en secondes)
-  verdict         Verdict? // VRAI, FAUX, TROMPEUR, INVERIFIABLE
-  confidenceScore Float?   // Score de confiance pour cette affirmation spécifique
+  timestamp       Float
+
+  // --- NOUVEAUX CHAMPS DE VALIDATION ---
+  validationStatus ClaimValidationStatus @default(UNVERIFIED) // Le verdict de notre agent validateur.
+  validationExplanation String? @db.Text  // L'explication du LLM juge.
+  validationScore Float?                  // La confiance du juge dans son propre verdict (0 à 1).
+
+  verdict         Verdict? // Le verdict du fact-checking (étape future)
+  confidenceScore Float?
   explanation     String?  @db.Text
   sources         Source[]
   createdAt       DateTime @default(now())
@@ -81,12 +87,22 @@ model Source {
   createdAt   DateTime @default(now())
 }
 
+// NOUVEL ENUM pour le statut de validation des claims
+enum ClaimValidationStatus {
+  VALID               // Fidèle à la source, bien extrait.
+  INACCURATE          // Le sens a été altéré ou est imprécis.
+  OUT_OF_CONTEXT      // Techniquement présent, mais trompeur sans le contexte.
+  HALLUCINATION       // N'est pas présent dans la transcription.
+  UNVERIFIED          // La validation n'a pas encore été effectuée.
+}
+
 // Enums pour standardiser les valeurs
 enum Status {
  PENDING
  FETCHING_METADATA
  TRANSCRIBING
  EXTRACTING_CLAIMS
+ VALIDATING_CLAIMS // <-- NOUVEAU STATUT
  COMPLETE
  FAILED
 }

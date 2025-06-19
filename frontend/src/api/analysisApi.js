@@ -1,10 +1,10 @@
 const API_URL = import.meta.env.VITE_API_URL;
 
-export async function createAnalysis(youtubeUrl, transcriptionProvider) {
+export async function createAnalysis(youtubeUrl, transcriptionProvider, withValidation) { // Ajout du paramètre
   const response = await fetch(`${API_URL}/analyses`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ youtubeUrl, transcriptionProvider }),
+    body: JSON.stringify({ youtubeUrl, transcriptionProvider, withValidation }), // Ajout dans le body
   });
 
   const data = await response.json();
