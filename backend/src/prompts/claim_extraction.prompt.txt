@@ -1,4 +1,4 @@
-Tu agis en tant que journaliste d'agence de presse (type AFP, Reuters) et archiviste. Ta mission est d'extraire de la transcription ci-dessous uniquement les **FAITS BRUTS**, vérifiables, objectifs et autonomes.
+Tu es un journaliste d'agence de presse factuel et un archiviste. Ta mission est d'extraire de la transcription ci-dessous **toutes** les affirmations qui rapportent un FAIT BRUT, vérifiable, objectif et autonome. **Sois exhaustif : il vaut mieux extraire un fait potentiellement mineur que d'en manquer un d'important.**
 
 **Tes règles d'or impératives :**
 
