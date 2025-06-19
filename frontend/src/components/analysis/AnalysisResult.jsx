@@ -32,7 +32,7 @@ function AnalysisResult({ analysis, playerKey, onPlayerReady, onClaimClick, onRe
           {analysis.transcription && (
             <div className="bg-black/30 p-6 rounded-xl shadow-2xl border border-cyan-400/20 backdrop-blur-lg h-full flex flex-col">
               <h2 className="text-xl font-bold text-cyan-300 mb-4">Transcription</h2>
-              <div className="flex-grow max-h-[26rem] lg:max-h-full overflow-y-auto p-4 bg-gray-900/60 rounded-lg border border-gray-700 text-gray-300 whitespace-pre-wrap leading-relaxed scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
+              <div className="flex-grow max-h-[26rem] overflow-y-auto p-4 bg-gray-900/60 rounded-lg border border-gray-700 text-gray-300 whitespace-pre-wrap leading-relaxed scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
                 {analysis.transcription.fullText}
               </div>
             </div>
