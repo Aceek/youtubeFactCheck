@@ -1,4 +1,4 @@
-import { useState } from 'react'; // Importer useState
+import { useState, useEffect } from 'react';
 import AnalysisForm from '../components/analysis/AnalysisForm';
 import AnalysisResult from '../components/analysis/AnalysisResult';
 import AnalysisStatus from '../components/analysis/AnalysisStatus';
@@ -9,6 +9,24 @@ function HomePage() {
   const { analysis, isLoading, error, startAnalysis, rerunClaimExtraction } = useAnalysis();
   const [player, setPlayer] = useState(null);
   const [playerKey, setPlayerKey] = useState(0);
+  // --- NOUVEL ÉTAT POUR LE TEMPS DE LECTURE ---
+  const [currentTime, setCurrentTime] = useState(0);
+
+  // --- NOUVEL EFFET POUR METTRE À JOUR LE TEMPS ---
+  useEffect(() => {
+    if (!player) return;
+
+    // Met à jour le temps toutes les 500ms
+    const interval = setInterval(async () => {
+      if (player && typeof player.getCurrentTime === 'function') {
+        const time = await player.getCurrentTime();
+        setCurrentTime(time);
+      }
+    }, 500);
+
+    // Nettoyage de l'intervalle quand le composant est démonté ou le player change
+    return () => clearInterval(interval);
+  }, [player]);
 
   const handleRerun = () => {
     if (analysis) {
@@ -58,6 +76,7 @@ function HomePage() {
           <VideoInfo video={analysis.video} />
           <AnalysisResult
             analysis={analysis}
+            currentTime={currentTime}
             playerKey={playerKey}
             onPlayerReady={handlePlayerReady}
             onClaimClick={handleClaimClick}

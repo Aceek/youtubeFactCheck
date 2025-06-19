@@ -262,7 +262,9 @@ async function getAnalysisById(id) {
     where: { id },
     include: {
       transcription: true,
-      claims: true,
+      claims: {
+              orderBy: { timestamp: 'asc' } // <-- TRI AJOUTÉ ICI
+            },
       video: true,
     },
   });
@@ -309,7 +311,9 @@ async function startAnalysis(youtubeUrl, transcriptionProvider) {
       orderBy: { createdAt: 'desc' },
       include: {
         transcription: true,
-        claims: true,
+        claims: {
+          orderBy: { timestamp: 'asc' } // <-- TRI AJOUTÉ ICI
+        },
         video: true
       },
     });
@@ -479,7 +483,10 @@ async function rerunClaimExtraction(analysisId) {
     where: { id: analysisId },
     include: {
       transcription: true,
-      video: true
+      video: true,
+      claims: {
+        orderBy: { timestamp: 'asc' } // <-- TRI AJOUTÉ ICI (par cohérence)
+      }
     },
   });
 
