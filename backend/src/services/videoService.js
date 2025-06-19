@@ -5,6 +5,7 @@ const claimExtractionService = require("./claimExtractionService");
 const { validateClaim, mockValidateClaim } = require("./claimValidationService");
 const fs = require('fs');
 const path = require('path');
+const debugLogService = require('./debugLogService'); // <-- NOUVEL IMPORT
 
 const prisma = require("../client"); // Utilisation du client partagé
 
@@ -40,15 +41,7 @@ async function getVideoMetadata(youtubeUrl) {
         });
 
         ytDlpProcess.on('close', (code) => {
-            const debugDir = path.resolve('./results');
-            fs.mkdirSync(debugDir, { recursive: true });
-            const timestamp = new Date().toISOString().replace(/:/g, '-');
-            const videoId = extractVideoId(youtubeUrl) || 'unknown';
-            const metadataFilePath = path.join(debugDir, `${videoId}_${timestamp}_metadata-output.txt`);
-            
-            // On écrit la sortie combinée pour le débogage
-            fs.writeFileSync(metadataFilePath, `--- COMBINED OUTPUT ---\n${outputData}\n\n--- RAW STDERR ---\n${errorMessages}`);
-            console.log(`Sortie brute des métadonnées sauvegardée dans : ${metadataFilePath}`);
+
 
             if (!outputData.trim()) {
                 // Si les deux canaux sont vides, on rejette.
@@ -476,24 +469,44 @@ async function runClaimExtractionProcess(analysisId, transcription, provider, wi
       const createdClaims = await prisma.claim.findMany({ where: { analysisId } });
       console.log(`Lancement de la validation pour ${createdClaims.length} affirmations...`);
       
-      const validationPromises = createdClaims.map(claim => {
-        // --- CORRECTION : On choisit la bonne fonction de validation ---
-        const validationFunction = provider === 'MOCK_PROVIDER'
-          ? mockValidateClaim(claim) // Utilise le mock
-          : validateClaim(claim, transcription.content.paragraphs); // Utilise la vraie fonction
+      // --- NOUVELLE LOGIQUE DE VALIDATION ET LOGGING CONSOLIDÉ ---
+      const validationReport = []; // On va stocker les résultats ici
 
-        return validationFunction.then(result =>
-            prisma.claim.update({
-              where: { id: claim.id },
-              data: {
-                validationStatus: result.validationStatus,
-                validationExplanation: result.explanation,
-                validationScore: result.validationScore,
-              }
-            })
-        );
+      const validationPromises = createdClaims.map(async (claim) => {
+        const validationFunction = provider === 'MOCK_PROVIDER'
+          ? mockValidateClaim(claim)
+          : validateClaim(claim, transcription.content.paragraphs);
+        
+        const result = await validationFunction;
+
+        // On stocke le résultat pour le rapport de débogage
+        const contextParagraph = transcription.content.paragraphs.find(p => claim.timestamp >= (p.start / 1000) && claim.timestamp <= (p.end / 1000));
+        validationReport.push({
+          claim_text: claim.text,
+          original_context: contextParagraph ? contextParagraph.text : "Contexte introuvable.",
+          validation_result: result,
+        });
+
+        // On met à jour la base de données comme avant
+        return prisma.claim.update({
+          where: { id: claim.id },
+          data: {
+            validationStatus: result.validationStatus,
+            validationExplanation: result.explanation,
+            validationScore: result.validationScore,
+          }
+        });
       });
+
       await Promise.all(validationPromises);
+
+      // On écrit le rapport complet dans un seul fichier
+      debugLogService.log(
+        analysisId,
+        '3_validation_report.json',
+        JSON.stringify(validationReport, null, 2) // On le formate en JSON pour une meilleure lisibilité
+      );
+      
       console.log("✅ Validation terminée.");
     }
     

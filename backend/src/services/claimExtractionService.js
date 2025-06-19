@@ -2,6 +2,7 @@ const { OpenAI } = require('openai');
 const fs = require('fs');
 const path = require('path');
 const prisma = require('../client');
+const debugLogService = require('./debugLogService'); // <-- NOUVEL IMPORT
 const stringSimilarity = require('string-similarity');
 const { extractJsonFromString } = require('../utils/jsonUtils'); // Import de la fonction utilitaire
 
@@ -65,27 +66,23 @@ function createTaggedTranscript(structuredContent) {
  * @param {string} model - Le nom du modèle LLM utilisé
  */
 async function extractClaimsWithTimestamps(analysisId, structuredTranscript, model) {
-    // 1. Créer le dossier de debug s'il n'existe pas
-    const debugDir = path.resolve('./results');
-    fs.mkdirSync(debugDir, { recursive: true });
-
-    // 2. Préparer un préfixe de nom de fichier unique pour cette exécution
-    const timestamp = new Date().toISOString().replace(/:/g, '-');
-    const filenamePrefix = `${analysisId}_${timestamp}`;
-
-    // 3. Préparer et sauvegarder le prompt
+    // 1. Préparer et sauvegarder le prompt
     const taggedText = createTaggedTranscript(structuredTranscript);
     if (!taggedText) {
         console.error("Transcription balisée vide. Impossible de procéder.");
         return [];
     }
 
-    const promptFilePath = path.join(debugDir, `${filenamePrefix}_prompt-sent.txt`);
-    fs.writeFileSync(promptFilePath, `--- PROMPT ENVOYÉ AU MODÈLE : ${model} ---\n\n${taggedText}`);
-    console.log(`Prompt sauvegardé pour débogage dans : ${promptFilePath}`);
+    // --- UTILISATION DU SERVICE DE LOG ---
+    debugLogService.log(
+      analysisId,
+      '1_extraction_prompt.txt',
+      `--- PROMPT ENVOYÉ AU MODÈLE : ${model} ---\n\n${taggedText}`
+    );
 
-    // 4. Appeler le LLM et sauvegarder la réponse BRUTE
+    // 2. Appeler le LLM et sauvegarder la réponse BRUTE
     let rawJson = null;
+    let responseSuccess = false;
     try {
         const response = await openrouter.chat.completions.create({
             model: model,
@@ -97,100 +94,88 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
         });
 
         rawJson = response.choices[0].message.content;
+        responseSuccess = true; // On marque la réponse comme réussie ici
 
-        // On sauvegarde la réponse IMMÉDIATEMENT, qu'elle soit valide ou non
-        const responseFilePath = path.join(debugDir, `${filenamePrefix}_llm-response_SUCCESS.txt`);
-        fs.writeFileSync(responseFilePath, rawJson);
-        console.log(`Réponse LLM sauvegardée pour débogage dans : ${responseFilePath}`);
-
-        // 5. Tenter de parser le JSON (c'est ici que l'erreur se produit)
-        // On nettoie la réponse AVANT de la parser.
+        // 3. Tenter de parser le JSON (c'est ici que l'erreur se produit)
         const cleanedJson = extractJsonFromString(rawJson);
 
         if (!cleanedJson) {
             throw new Error("Aucun objet JSON valide n'a pu être extrait de la réponse du LLM.");
         }
 
-        const parsedData = JSON.parse(cleanedJson); // On parse la chaîne nettoyée !
+        const parsedData = JSON.parse(cleanedJson);
         if (!parsedData.claims || !Array.isArray(parsedData.claims)) {
             throw new Error("Le JSON parsé n'a pas la structure attendue.");
         }
 
         console.log(`${parsedData.claims.length} affirmations brutes extraites. Raffinage des timestamps...`);
 
-    console.log(`${parsedData.claims.length} affirmations brutes extraites. Raffinage des timestamps...`);
+        // --- NOUVELLE LOGIQUE DE RAFFINAGE PLUS ROBUSTE ---
+        const claimsWithTimestamps = parsedData.claims.map(claimData => {
+            const { claim: claimText, estimated_timestamp } = claimData;
+            if (typeof estimated_timestamp !== 'number') {
+                return { text: claimText, timestamp: 0 };
+            }
 
-    // --- NOUVELLE LOGIQUE DE RAFFINAGE PLUS ROBUSTE ---
-    const claimsWithTimestamps = parsedData.claims.map(claimData => {
-        const { claim: claimText, estimated_timestamp } = claimData;
-        if (typeof estimated_timestamp !== 'number') {
-            return { text: claimText, timestamp: 0 };
-        }
+            const searchWindowStart = Math.max(0, estimated_timestamp - 10);
+            const searchWindowEnd = estimated_timestamp + 10;
+            
+            const wordsArray = structuredTranscript.words || structuredTranscript;
 
-        const searchWindowStart = Math.max(0, estimated_timestamp - 10); // Fenêtre un peu plus large
-        const searchWindowEnd = estimated_timestamp + 10;
-        
-        const wordsArray = structuredTranscript.words || structuredTranscript;
+            const windowWords = wordsArray.filter(word => {
+                const wordTime = word.start / 1000;
+                return wordTime >= searchWindowStart && wordTime <= searchWindowEnd;
+            });
 
-        const windowWords = wordsArray.filter(word => {
-            const wordTime = word.start / 1000;
-            return wordTime >= searchWindowStart && wordTime <= searchWindowEnd;
-        });
+            if (windowWords.length === 0) {
+                console.warn(`⚠️ Fenêtre de recherche vide pour le timestamp ${estimated_timestamp}. Utilisation du timestamp estimé.`);
+                return { text: claimText, timestamp: estimated_timestamp };
+            }
+            
+            const claimWords = normalizeText(claimText).split(' ');
+            const windowText = windowWords.map(w => normalizeText(w.text)).join(' ');
 
-        if (windowWords.length === 0) {
-            console.warn(`⚠️ Fenêtre de recherche vide pour le timestamp ${estimated_timestamp}. Utilisation du timestamp estimé.`);
-            return { text: claimText, timestamp: estimated_timestamp };
-        }
-        
-        // On ne compare plus juste la similarité de chaînes.
-        // On cherche la sous-séquence la plus longue de mots du claim dans la fenêtre.
-        // C'est plus robuste aux reformulations.
+            let bestMatch = { score: 0, timestamp: estimated_timestamp };
 
-        const claimWords = normalizeText(claimText).split(' ');
-        const windowText = windowWords.map(w => normalizeText(w.text)).join(' ');
+            for (let i = 0; i < claimWords.length; i++) {
+                for (let j = i + 1; j <= claimWords.length; j++) {
+                    const subSequence = claimWords.slice(i, j).join(' ');
+                    if (subSequence.length < 5) continue;
 
-        let bestMatch = { score: 0, timestamp: estimated_timestamp };
-
-        // On cherche des correspondances de sous-séquences
-        for (let i = 0; i < claimWords.length; i++) {
-            for (let j = i + 1; j <= claimWords.length; j++) {
-                const subSequence = claimWords.slice(i, j).join(' ');
-                if (subSequence.length < 5) continue; // Ignorer les séquences trop courtes
-
-                if (windowText.includes(subSequence)) {
-                    // On a trouvé une correspondance. On lui donne un score basé sur sa longueur.
-                    const score = subSequence.length / claimText.length;
-                    if (score > bestMatch.score) {
-                        bestMatch.score = score;
-                        // On prend le timestamp du début de la fenêtre comme approximation améliorée
-                        bestMatch.timestamp = Math.round(windowWords[0].start / 1000);
+                    if (windowText.includes(subSequence)) {
+                        const score = subSequence.length / claimText.length;
+                        if (score > bestMatch.score) {
+                            bestMatch.score = score;
+                            bestMatch.timestamp = Math.round(windowWords[0].start / 1000);
+                        }
                     }
                 }
             }
-        }
-        
-        const CONFIDENCE_THRESHOLD = 0.5; // On peut être plus souple
-        if (bestMatch.score >= CONFIDENCE_THRESHOLD) {
-            console.log(`✅ Raffinage partiel réussi pour "${claimText.substring(0,20)}..." (Score: ${bestMatch.score.toFixed(2)})`);
-            return { text: claimText, timestamp: bestMatch.timestamp };
-        }
-        
-        console.warn(`⚠️ Échec du raffinage pour "${claimText.substring(0,20)}...". Utilisation du timestamp estimé.`);
-        return { text: claimText, timestamp: estimated_timestamp };
-    });
+            
+            const CONFIDENCE_THRESHOLD = 0.5;
+            if (bestMatch.score >= CONFIDENCE_THRESHOLD) {
+                console.log(`✅ Raffinage partiel réussi pour "${claimText.substring(0,20)}..." (Score: ${bestMatch.score.toFixed(2)})`);
+                return { text: claimText, timestamp: bestMatch.timestamp };
+            }
+            
+            console.warn(`⚠️ Échec du raffinage pour "${claimText.substring(0,20)}...". Utilisation du timestamp estimé.`);
+            return { text: claimText, timestamp: estimated_timestamp };
+        });
 
-    return claimsWithTimestamps;
-} catch (e) {
-    console.error("Erreur de parsing ou d'appel LLM:", e.message);
+        return claimsWithTimestamps;
 
-        // Si une réponse a quand même été reçue mais est invalide
+    } catch (e) {
+        console.error("Erreur de parsing ou d'appel LLM:", e.message);
+        // On propage l'erreur pour que le service appelant (videoService) puisse la gérer
+        throw e;
+    } finally {
+        // Ce bloc s'exécute toujours, succès ou échec du try.
         if (rawJson) {
-            const errorFilePath = path.join(debugDir, `${filenamePrefix}_llm-response_FAILED.txt`);
-            fs.writeFileSync(errorFilePath, rawJson);
-            console.error(`Réponse LLM INVALIDE sauvegardée pour débogage dans : ${errorFilePath}`);
+            const fileName = responseSuccess
+                ? '2_extraction_response.txt'
+                : '2_extraction_response_FAILED.txt';
+            debugLogService.log(analysisId, fileName, rawJson);
         }
-
-        throw new Error("N'a pas pu parser la réponse du service d'IA.");
     }
 }
 
