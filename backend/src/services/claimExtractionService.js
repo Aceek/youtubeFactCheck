@@ -136,47 +136,70 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
 
         console.log(`${parsedData.claims.length} affirmations brutes extraites. Raffinage des timestamps...`);
 
-        // Raffinage des timestamps (inchangé)
-        const claimsWithTimestamps = parsedData.claims.map(claimData => {
-            const { claim: claimText, estimated_timestamp } = claimData;
-            if (typeof estimated_timestamp !== 'number') {
-                return { text: claimText, timestamp: 0 };
-            }
+    console.log(`${parsedData.claims.length} affirmations brutes extraites. Raffinage des timestamps...`);
 
-            // Créer une fenêtre de recherche (ex: -5s à +20s autour de l'estimation)
-            const searchWindowStart = Math.max(0, estimated_timestamp - 5);
-            const searchWindowEnd = estimated_timestamp + 20;
+    // --- NOUVELLE LOGIQUE DE RAFFINAGE PLUS ROBUSTE ---
+    const claimsWithTimestamps = parsedData.claims.map(claimData => {
+        const { claim: claimText, estimated_timestamp } = claimData;
+        if (typeof estimated_timestamp !== 'number') {
+            return { text: claimText, timestamp: 0 };
+        }
 
-            // Utiliser le même tableau de mots que celui passé à createTaggedTranscript
-            const wordsArray = structuredTranscript.words || structuredTranscript;
+        const searchWindowStart = Math.max(0, estimated_timestamp - 10); // Fenêtre un peu plus large
+        const searchWindowEnd = estimated_timestamp + 10;
+        
+        const wordsArray = structuredTranscript.words || structuredTranscript;
 
-            const windowWords = wordsArray.filter(word => {
-                const wordTime = word.start / 1000;
-                return wordTime >= searchWindowStart && wordTime <= searchWindowEnd;
-            });
-
-            if (windowWords.length === 0) {
-                return { text: claimText, timestamp: estimated_timestamp };
-            }
-
-            // Appliquer le "fuzzy matching" uniquement dans cette fenêtre
-            const windowText = windowWords.map(w => w.text).join(' ');
-            const { bestMatch } = stringSimilarity.findBestMatch(normalizeText(claimText), [normalizeText(windowText)]);
-
-            const CONFIDENCE_THRESHOLD = 0.6;
-            if (bestMatch.rating >= CONFIDENCE_THRESHOLD) {
-                console.log(`✅ Raffinage réussi pour "${claimText.substring(0,20)}..." (Score: ${bestMatch.rating.toFixed(2)})`);
-                return { text: claimText, timestamp: Math.round(windowWords[0].start / 1000) };
-            }
-
-            console.warn(`⚠️ Échec du raffinage pour "${claimText.substring(0,20)}...". Utilisation du timestamp estimé.`);
-            return { text: claimText, timestamp: estimated_timestamp };
+        const windowWords = wordsArray.filter(word => {
+            const wordTime = word.start / 1000;
+            return wordTime >= searchWindowStart && wordTime <= searchWindowEnd;
         });
 
-        return claimsWithTimestamps;
+        if (windowWords.length === 0) {
+            console.warn(`⚠️ Fenêtre de recherche vide pour le timestamp ${estimated_timestamp}. Utilisation du timestamp estimé.`);
+            return { text: claimText, timestamp: estimated_timestamp };
+        }
+        
+        // On ne compare plus juste la similarité de chaînes.
+        // On cherche la sous-séquence la plus longue de mots du claim dans la fenêtre.
+        // C'est plus robuste aux reformulations.
 
-    } catch (e) {
-        console.error("Erreur de parsing ou d'appel LLM:", e.message);
+        const claimWords = normalizeText(claimText).split(' ');
+        const windowText = windowWords.map(w => normalizeText(w.text)).join(' ');
+
+        let bestMatch = { score: 0, timestamp: estimated_timestamp };
+
+        // On cherche des correspondances de sous-séquences
+        for (let i = 0; i < claimWords.length; i++) {
+            for (let j = i + 1; j <= claimWords.length; j++) {
+                const subSequence = claimWords.slice(i, j).join(' ');
+                if (subSequence.length < 5) continue; // Ignorer les séquences trop courtes
+
+                if (windowText.includes(subSequence)) {
+                    // On a trouvé une correspondance. On lui donne un score basé sur sa longueur.
+                    const score = subSequence.length / claimText.length;
+                    if (score > bestMatch.score) {
+                        bestMatch.score = score;
+                        // On prend le timestamp du début de la fenêtre comme approximation améliorée
+                        bestMatch.timestamp = Math.round(windowWords[0].start / 1000);
+                    }
+                }
+            }
+        }
+        
+        const CONFIDENCE_THRESHOLD = 0.5; // On peut être plus souple
+        if (bestMatch.score >= CONFIDENCE_THRESHOLD) {
+            console.log(`✅ Raffinage partiel réussi pour "${claimText.substring(0,20)}..." (Score: ${bestMatch.score.toFixed(2)})`);
+            return { text: claimText, timestamp: bestMatch.timestamp };
+        }
+        
+        console.warn(`⚠️ Échec du raffinage pour "${claimText.substring(0,20)}...". Utilisation du timestamp estimé.`);
+        return { text: claimText, timestamp: estimated_timestamp };
+    });
+
+    return claimsWithTimestamps;
+} catch (e) {
+    console.error("Erreur de parsing ou d'appel LLM:", e.message);
 
         // Si une réponse a quand même été reçue mais est invalide
         if (rawJson) {
