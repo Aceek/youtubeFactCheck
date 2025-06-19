@@ -466,7 +466,10 @@ async function runClaimExtractionProcess(analysisId, transcription, provider, wi
     // --- NOUVELLE ÉTAPE : VALIDATION CONDITIONNELLE ---
     if (withValidation) {
       await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'VALIDATING_CLAIMS' } });
-      const createdClaims = await prisma.claim.findMany({ where: { analysisId } });
+      const createdClaims = await prisma.claim.findMany({
+        where: { analysisId },
+        orderBy: { timestamp: 'asc' }
+      });
       console.log(`Lancement de la validation pour ${createdClaims.length} affirmations...`);
       
       // --- NOUVELLE LOGIQUE DE VALIDATION ET LOGGING CONSOLIDÉ ---
@@ -500,11 +503,19 @@ async function runClaimExtractionProcess(analysisId, transcription, provider, wi
 
       await Promise.all(validationPromises);
 
-      // On écrit le rapport complet dans un seul fichier
+      // --- CORRECTION : Assurer l'ordre dans le rapport final ---
+      // On trie le rapport en se basant sur l'ordre des `createdClaims`
+      // car les promesses peuvent se résoudre dans un ordre différent.
+      validationReport.sort((a, b) => {
+        const indexA = createdClaims.findIndex(c => c.text === a.claim_text);
+        const indexB = createdClaims.findIndex(c => c.text === b.claim_text);
+        return indexA - indexB;
+      });
+
       debugLogService.log(
         analysisId,
         '3_validation_report.json',
-        JSON.stringify(validationReport, null, 2) // On le formate en JSON pour une meilleure lisibilité
+        JSON.stringify(validationReport, null, 2)
       );
       
       console.log("✅ Validation terminée.");
