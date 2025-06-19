@@ -3,11 +3,12 @@ import LoadingSpinner from '../common/LoadingSpinner';
 
 const YOUTUBE_URL_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/;
 
-function AnalysisForm({ onSubmit, isLoading }) {
+// ...
+// On reçoit l'état et le setter en props
+function AnalysisForm({ onSubmit, isLoading, runValidation, setRunValidation }) {
   const [url, setUrl] = useState('');
   const [provider, setProvider] = useState('MOCK_PROVIDER');
   const [formError, setFormError] = useState('');
-  const [runValidation, setRunValidation] = useState(false); // <-- NOUVEL ÉTAT
 
   const handleUrlChange = (e) => {
     const newUrl = e.target.value;
@@ -31,9 +32,9 @@ function AnalysisForm({ onSubmit, isLoading }) {
     }
     
     setFormError(''); // On efface toute erreur précédente
-    onSubmit(url, provider, runValidation); // <-- PASSER LE NOUVEL ÉTAT
+    onSubmit(url, provider, runValidation);
   };
-
+  
   return (
     <div className="bg-black/30 p-8 rounded-xl shadow-2xl border border-cyan-400/20 backdrop-blur-lg">
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -108,8 +109,8 @@ function AnalysisForm({ onSubmit, isLoading }) {
                 id="validation-toggle"
                 type="checkbox"
                 className="sr-only"
-                checked={runValidation}
-                onChange={() => setRunValidation(!runValidation)}
+                checked={runValidation} // On utilise la prop
+                onChange={() => setRunValidation(!runValidation)} // On utilise la prop
               />
               <div className="block bg-gray-600 w-14 h-8 rounded-full"></div>
               <div className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform ${runValidation ? 'translate-x-6 bg-cyan-400' : ''}`}></div>

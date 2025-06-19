@@ -1,14 +1,7 @@
 const { OpenAI } = require('openai');
 const fs = require('fs');
 const path = require('path');
-// Idéalement, à déplacer dans un fichier utils/jsonUtils.js et importer
-function extractJsonFromString(str) {
-    if (!str || typeof str !== 'string') return null;
-    const firstBrace = str.indexOf('{');
-    const lastBrace = str.lastIndexOf('}');
-    if (firstBrace === -1 || lastBrace === -1 || lastBrace < firstBrace) return null;
-    return str.substring(firstBrace, lastBrace + 1);
-}
+const { extractJsonFromString } = require('../utils/jsonUtils'); // Import de la fonction utilitaire
 
 const openrouter = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
@@ -50,4 +43,28 @@ async function validateClaim(claim, paragraphs) {
   }
 }
 
-module.exports = { validateClaim };
+// --- NOUVELLE FONCTION DE VALIDATION MOCK ---
+/**
+ * Simule la validation d'un claim.
+ * @returns {Promise<object>} Un résultat de validation simulé.
+ */
+async function mockValidateClaim(claim) {
+  console.log(`MOCK_VALIDATOR: Validation simulée pour le claim ID ${claim.id}...`);
+  await new Promise(resolve => setTimeout(resolve, 200)); // Simule un petit délai
+
+  // On retourne un statut aléatoire pour tester l'UI
+  const statuses = ['VALID', 'INACCURATE', 'OUT_OF_CONTEXT', 'HALLUCINATION'];
+  const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
+  
+  const result = {
+    validationStatus: randomStatus,
+    explanation: `Ceci est une explication simulée pour un statut '${randomStatus}'.`,
+    validationScore: Math.random() * (0.95 - 0.7) + 0.7, // Score aléatoire entre 0.7 et 0.95
+  };
+
+  console.log(`MOCK_VALIDATOR: ✅ Claim ID ${claim.id} validé avec le statut simulé : ${randomStatus}`);
+  return result;
+}
+
+// On exporte la nouvelle fonction
+module.exports = { validateClaim, mockValidateClaim };

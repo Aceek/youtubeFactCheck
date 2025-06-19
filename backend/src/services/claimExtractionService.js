@@ -3,30 +3,12 @@ const fs = require('fs');
 const path = require('path');
 const prisma = require('../client');
 const stringSimilarity = require('string-similarity');
+const { extractJsonFromString } = require('../utils/jsonUtils'); // Import de la fonction utilitaire
 
 const openrouter = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
   apiKey: process.env.OPENROUTER_API_KEY,
 });
-/**
- * Extrait la première sous-chaîne JSON valide d'une chaîne de caractères potentiellement "polluée".
- * @param {string} str La chaîne de caractères brute renvoyée par le LLM.
- * @returns {string | null} La sous-chaîne JSON ou null si aucune n'est trouvée.
- */
-function extractJsonFromString(str) {
-    if (!str || typeof str !== 'string') {
-        return null;
-    }
-    // Trouve l'index de la première accolade ouvrante '{' et de la dernière accolade fermante '}'
-    const firstBrace = str.indexOf('{');
-    const lastBrace = str.lastIndexOf('}');
-    if (firstBrace === -1 || lastBrace === -1 || lastBrace < firstBrace) {
-        // Si on ne trouve pas une structure JSON valide
-        return null;
-    }
-    // Extrait la sous-chaîne entre ces deux points
-    return str.substring(firstBrace, lastBrace + 1);
-}
 
 const promptPath = path.join(__dirname, '../prompts/claim_extraction.prompt.txt');
 const SYSTEM_PROMPT = fs.readFileSync(promptPath, 'utf-8');

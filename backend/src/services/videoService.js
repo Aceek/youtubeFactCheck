@@ -2,7 +2,7 @@ const { PrismaClient } = require("@prisma/client");
 const axios = require("axios");
 const { spawn } = require("child_process");
 const claimExtractionService = require("./claimExtractionService");
-const claimValidationService = require("./claimValidationService"); // <-- NOUVEL IMPORT
+const { validateClaim, mockValidateClaim } = require("./claimValidationService");
 const fs = require('fs');
 const path = require('path');
 
@@ -476,17 +476,23 @@ async function runClaimExtractionProcess(analysisId, transcription, provider, wi
       const createdClaims = await prisma.claim.findMany({ where: { analysisId } });
       console.log(`Lancement de la validation pour ${createdClaims.length} affirmations...`);
       
-      const validationPromises = createdClaims.map(claim =>
-        claimValidationService.validateClaim(claim, transcription.content.paragraphs)
-          .then(result => prisma.claim.update({
-            where: { id: claim.id },
-            data: {
-              validationStatus: result.validationStatus,
-              validationExplanation: result.explanation,
-              validationScore: result.validationScore,
-            }
-          }))
-      );
+      const validationPromises = createdClaims.map(claim => {
+        // --- CORRECTION : On choisit la bonne fonction de validation ---
+        const validationFunction = provider === 'MOCK_PROVIDER'
+          ? mockValidateClaim(claim) // Utilise le mock
+          : validateClaim(claim, transcription.content.paragraphs); // Utilise la vraie fonction
+
+        return validationFunction.then(result =>
+            prisma.claim.update({
+              where: { id: claim.id },
+              data: {
+                validationStatus: result.validationStatus,
+                validationExplanation: result.explanation,
+                validationScore: result.validationScore,
+              }
+            })
+        );
+      });
       await Promise.all(validationPromises);
       console.log("✅ Validation terminée.");
     }
@@ -507,10 +513,11 @@ async function runClaimExtractionProcess(analysisId, transcription, provider, wi
 /**
  * NOUVELLE FONCTION : Relance uniquement l'extraction des "claims".
  * @param {number} analysisId - L'ID de l'analyse à relancer.
+ * @param {boolean} withValidation - Indique si la validation doit être exécutée après l'extraction.
  * @returns {object} La nouvelle analyse mise à jour.
  */
-async function rerunClaimExtraction(analysisId) {
-  console.log(`RE-ANALYSE manuelle des claims pour l'analyse ID: ${analysisId}`);
+async function rerunClaimExtraction(analysisId, withValidation) { // <-- AJOUT du paramètre withValidation
+  console.log(`RE-ANALYSE manuelle des claims pour l'analyse ID: ${analysisId}, validation: ${withValidation}`);
   
   const analysisToRerun = await prisma.analysis.findUnique({
     where: { id: analysisId },
@@ -540,7 +547,7 @@ async function rerunClaimExtraction(analysisId) {
 
   // 3. On lance le processus d'extraction en arrière-plan.
   // On passe le provider de la transcription existante pour que le mock fonctionne.
-  runClaimExtractionProcess(analysisId, analysisToRerun.transcription, analysisToRerun.transcription.provider);
+  runClaimExtractionProcess(analysisId, analysisToRerun.transcription, analysisToRerun.transcription.provider, withValidation); // <-- PASSER withValidation
 
   // On attache les métadonnées pour que l'UI se mette à jour instantanément
   const updatedAnalysisWithVideo = {

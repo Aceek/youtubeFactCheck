@@ -58,23 +58,20 @@ export function useAnalysis() {
     }
   }, [pollAnalysis]);
 
-  const rerunClaimExtraction = useCallback(async (id) => {
+  const rerunClaimExtraction = useCallback(async (id, withValidation) => { // <-- Accepte le paramètre
     stopPolling();
     setError(null);
     try {
-      // --- CORRECTION CLÉ : MISE À JOUR OPTIMISTE ET NON DESTRUCTIVE ---
-      // On met à jour l'état local immédiatement pour une meilleure réactivité.
-      // On préserve toutes les données existantes (comme .transcription) et on ne change que ce qui est nécessaire.
       setAnalysis(prevAnalysis => ({
         ...prevAnalysis,
-        status: 'EXTRACTING_CLAIMS', // On passe directement à l'étape d'extraction
-        claims: [], // On vide les anciens claims de l'UI immédiatement
+        // On passe directement à VALIDATING si c'est activé, sinon EXTRACTING
+        status: withValidation ? 'VALIDATING_CLAIMS' : 'EXTRACTING_CLAIMS',
+        claims: [],
       }));
 
-      // On lance la requête au backend en arrière-plan
-      await reRunClaims(id);
+      // On passe la valeur à l'API
+      await reRunClaims(id, withValidation);
 
-      // On relance le polling pour suivre la progression et obtenir les nouveaux claims
       pollingIntervalRef.current = setInterval(() => {
         pollAnalysis(id);
       }, 5000);

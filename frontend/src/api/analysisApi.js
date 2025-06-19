@@ -26,9 +26,12 @@ export async function fetchAnalysis(id) {
   return data;
 }
 
-export async function reRunClaims(id) {
+export async function reRunClaims(id, withValidation) { // <-- Accepte le paramètre
   const response = await fetch(`${API_URL}/analyses/${id}/rerun-claim-extraction`, {
     method: 'POST',
+    // --- CORRECTION : On ajoute le body et le header ---
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ withValidation }),
   });
 
   const data = await response.json();

@@ -9,8 +9,24 @@ function HomePage() {
   const { analysis, isLoading, error, startAnalysis, rerunClaimExtraction } = useAnalysis();
   const [player, setPlayer] = useState(null);
   const [playerKey, setPlayerKey] = useState(0);
-  // --- NOUVEL ÉTAT POUR LE TEMPS DE LECTURE ---
   const [currentTime, setCurrentTime] = useState(0);
+  // --- NOUVEAU : On a besoin de l'état du toggle ici aussi ---
+  // Pour plus de simplicité, on le gère ici plutôt que dans AnalysisForm.
+  // Mais la meilleure approche serait un "state management" global (Contexte, Zustand, etc.)
+  // Pour l'instant, on duplique pour rester simple.
+  const [runValidationOnSubmit, setRunValidationOnSubmit] = useState(false);
+
+  const handleRerun = () => {
+    if (analysis) {
+      // On passe la valeur du toggle au hook
+      rerunClaimExtraction(analysis.id, runValidationOnSubmit);
+    }
+  };
+  
+  const handleFormSubmit = (url, provider, withValidation) => {
+    setRunValidationOnSubmit(withValidation); // On mémorise l'état du toggle
+    startAnalysis(url, provider, withValidation);
+  };
 
   // --- NOUVEL EFFET POUR METTRE À JOUR LE TEMPS ---
   useEffect(() => {
@@ -27,12 +43,6 @@ function HomePage() {
     // Nettoyage de l'intervalle quand le composant est démonté ou le player change
     return () => clearInterval(interval);
   }, [player]);
-
-  const handleRerun = () => {
-    if (analysis) {
-      rerunClaimExtraction(analysis.id);
-    }
-  };
 
   const handlePlayerReady = (eventTarget) => setPlayer(eventTarget);
 
@@ -53,7 +63,13 @@ function HomePage() {
 
   return (
     <div className="max-w-4xl lg:max-w-7xl mx-auto space-y-8">
-      <AnalysisForm onSubmit={startAnalysis} isLoading={isLoading} />
+      {/* On passe la nouvelle fonction de soumission */}
+      <AnalysisForm
+        onSubmit={handleFormSubmit}
+        isLoading={isLoading}
+        runValidation={runValidationOnSubmit}
+        setRunValidation={setRunValidationOnSubmit}
+      />
       
       {error && (
         <div className="p-4 bg-red-900/50 border border-red-700 rounded-lg text-red-300 animate-fade-in" role="alert">
@@ -62,7 +78,7 @@ function HomePage() {
         </div>
       )}
 
-      {showGlobalStatus && <AnalysisStatus analysis={analysis} />}
+      {showGlobalStatus && <AnalysisStatus analysis={analysis} withValidation={runValidationOnSubmit} />}
 
       {showResults && (
         <>

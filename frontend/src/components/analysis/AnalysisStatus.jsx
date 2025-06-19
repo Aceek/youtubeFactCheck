@@ -21,18 +21,25 @@ const DotIcon = () => (
 );
 
 
-function AnalysisStatus({ analysis }) {
+function AnalysisStatus({ analysis, withValidation }) {
   // Sécurité : si analysis est null ou ne contient pas de status, on n'affiche rien
   if (!analysis || !analysis.status) return null;
 
   // Définir les étapes de notre processus. C'est facilement extensible pour le futur.
-  const steps = [
+  const baseSteps = [
     { status: 'PENDING', label: 'Initialisation de l\'analyse' },
-    { status: 'FETCHING_METADATA', label: 'Récupération des informations de la vidéo' }, // <-- NOUVELLE ÉTAPE
+    { status: 'FETCHING_METADATA', label: 'Récupération des informations de la vidéo' },
     { status: 'TRANSCRIBING', label: 'Téléchargement et Transcription de l\'audio' },
     { status: 'EXTRACTING_CLAIMS', label: 'Extraction des affirmations factuelles' },
-    { status: 'COMPLETE', label: 'Analyse terminée' }
   ];
+
+  if (withValidation) {
+    baseSteps.push({ status: 'VALIDATING_CLAIMS', label: 'Validation des affirmations' });
+  }
+
+  baseSteps.push({ status: 'COMPLETE', label: 'Analyse terminée' });
+
+  const steps = baseSteps;
 
   // Trouver l'index de l'étape actuelle
   const currentStepIndex = steps.findIndex(step => step.status === analysis.status);
