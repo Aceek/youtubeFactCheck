@@ -38,9 +38,14 @@ function AnalysisStatus({ analysis }) {
   const currentStepIndex = steps.findIndex(step => step.status === analysis.status);
 
   return (
-    <div className="bg-gray-800 p-6 rounded-lg shadow-lg border border-gray-700 animate-fade-in">
-      <h2 className="text-xl font-bold text-cyan-400 mb-4">Progression de l'Analyse</h2>
-      <div className="space-y-4">
+    <div className="bg-black/30 p-8 rounded-xl shadow-2xl border border-cyan-400/20 backdrop-blur-lg animate-fade-in">
+      <h2 className="text-2xl font-bold text-center text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-fuchsia-400 mb-6">
+        Analyse en cours...
+      </h2>
+      <div className="relative space-y-6">
+        {/* Ligne de progression en arrière-plan */}
+        <div className="absolute left-4 top-0 h-full w-0.5 bg-cyan-400/20" />
+        
         {steps.map((step, index) => {
           let visualState = 'pending';
           if (index < currentStepIndex) {
@@ -50,26 +55,30 @@ function AnalysisStatus({ analysis }) {
           }
 
           return (
-            <div key={step.status} className="flex items-center gap-4 transition-opacity duration-500">
-              <div className="flex-shrink-0">
+            <div key={step.status} className="flex items-center gap-5 relative pl-2">
+              <div className="flex-shrink-0 z-10">
                 {visualState === 'completed' && <CheckIcon />}
                 {visualState === 'in-progress' && <SpinnerIcon />}
                 {visualState === 'pending' && <DotIcon />}
               </div>
-              <p className={`
-                ${visualState === 'completed' ? 'text-green-400 font-semibold' : ''}
-                ${visualState === 'in-progress' ? 'text-cyan-400 font-bold' : ''}
-                ${visualState === 'pending' ? 'text-gray-500' : ''}
-              `}>
+              <p className={`text-lg transition-all duration-300 ${
+                visualState === 'completed' ? 'text-green-400 font-semibold' : ''
+              } ${
+                visualState === 'in-progress' ? 'text-cyan-300 font-bold scale-105' : ''
+              } ${
+                visualState === 'pending' ? 'text-gray-500' : ''
+              }`}>
                 {step.label}
               </p>
             </div>
           );
         })}
       </div>
-       {analysis.status === 'FAILED' && (
-         <p className="mt-4 text-red-400 font-bold">L'analyse a échoué. Veuillez réessayer.</p>
-       )}
+      {analysis.status === 'FAILED' && (
+        <p className="mt-6 text-center text-red-400 font-bold text-lg animate-pulse">
+          L'analyse a échoué. Veuillez vérifier l'URL et réessayer.
+        </p>
+      )}
     </div>
   );
 }
