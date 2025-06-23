@@ -158,7 +158,7 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
   console.log(`📋 Total avant dédoublonnage: ${allClaims.length} claims`);
 
   // 5. Dédoublonnage des claims (à cause du chevauchement)
-  const uniqueClaims = deduplicateClaims(allClaims);
+  const uniqueClaims = deduplicateClaims(allClaims, chunks, structuredTranscript.paragraphs);
   
   console.log(`✨ Total après dédoublonnage: ${uniqueClaims.length} claims uniques`);
   
@@ -192,28 +192,64 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
 }
 
 /**
- * Dédoublonne les claims basé sur le texte et le timestamp
- * @param {Array} claims - Liste des claims potentiellement dupliqués
- * @returns {Array} Claims uniques
+ * Filtre les claims pour supprimer les doublons générés par le chevauchement des chunks.
+ * La stratégie consiste à ignorer les claims trouvés dans la zone de chevauchement
+ * de chaque chunk, sauf pour le tout premier chunk.
+ * @param {Array} allClaims - Liste de tous les claims extraits de tous les chunks.
+ * @param {Array} chunks - La liste des chunks générés par chunkTranscript.
+ * @param {Array} paragraphs - La liste des paragraphes originaux d'AssemblyAI.
+ * @returns {Array} Claims uniques après filtrage.
  */
-function deduplicateClaims(claims) {
-  const seen = new Set();
-  const uniqueClaims = [];
+function deduplicateClaims(allClaims, chunks, paragraphs) {
+  if (chunks.length <= 1) {
+    return allClaims; // Pas de chevauchement s'il n'y a qu'un chunk ou moins.
+  }
 
-  for (const claim of claims) {
-    // Créer une clé unique basée sur le texte normalisé et le timestamp
-    const normalizedText = claim.text.toLowerCase().trim();
-    const key = `${normalizedText}|${claim.timestamp}`;
+  const chunkOverlapSize = parseInt(process.env.CHUNK_OVERLAP) || 1;
+  const uniqueClaims = [];
+  const duplicatesRemoved = { count: 0 }; // Utiliser un objet pour passer par référence
+
+  // Trier les claims par timestamp pour un traitement ordonné.
+  const sortedClaims = allClaims.sort((a, b) => a.timestamp - b.timestamp);
+
+  for (const claim of sortedClaims) {
+    // Trouver à quel chunk ce claim appartient.
+    const parentChunk = chunks.find(chunk => claim.timestamp >= chunk.startTime && claim.timestamp <= chunk.endTime);
     
-    if (!seen.has(key)) {
-      seen.add(key);
+    if (!parentChunk) {
+      // Cas peu probable, mais on le garde par sécurité.
       uniqueClaims.push(claim);
+      continue;
+    }
+
+    // Le premier chunk (id: 0) est notre source de vérité, on garde tout.
+    if (parentChunk.id === 0) {
+      uniqueClaims.push(claim);
+      continue;
+    }
+
+    // Pour les chunks suivants, on détermine la "vraie" date de début (après l'overlap).
+    const firstNonOverlapParagraphIndex = parentChunk.paragraphIndices.start + chunkOverlapSize;
+
+    // Si l'index est valide dans la liste des paragraphes...
+    if (firstNonOverlapParagraphIndex < paragraphs.length) {
+      const trueStartTime = Math.round(paragraphs[firstNonOverlapParagraphIndex].start / 1000);
+
+      // On ne garde le claim que s'il est dans la partie "nouvelle" du chunk.
+      if (claim.timestamp >= trueStartTime) {
+        uniqueClaims.push(claim);
+      } else {
+        // Ce claim est dans la zone de chevauchement, on le considère comme un doublon.
+        duplicatesRemoved.count++;
+      }
+    } else {
+      // Ce chunk est entièrement composé de paragraphes de chevauchement (cas final), on ne garde rien.
+      duplicatesRemoved.count++;
     }
   }
 
-  const duplicatesRemoved = claims.length - uniqueClaims.length;
-  if (duplicatesRemoved > 0) {
-    console.log(`🔄 ${duplicatesRemoved} doublons supprimés lors du dédoublonnage`);
+  if (duplicatesRemoved.count > 0) {
+    console.log(`🔄 ${duplicatesRemoved.count} doublons potentiels supprimés grâce au filtrage par chevauchement.`);
   }
 
   return uniqueClaims;
