@@ -45,12 +45,15 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
 
   console.log(`📦 ${chunks.length} chunks générés pour l'extraction`);
 
-  // 4. Traiter chaque chunk et collecter tous les claims
+  // 4. Traiter les chunks par lots et collecter tous les claims
   const allClaims = [];
+  const limit = parseInt(process.env.CONCURRENT_CHUNK_LIMIT) || 3;
   
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
-    console.log(`🔍 Traitement du chunk ${i + 1}/${chunks.length} (${chunk.startTime}s - ${chunk.endTime}s)`);
+  console.log(`🚀 Traitement par lots avec une limite de ${limit} chunks simultanés`);
+
+  // Créer un tableau de tâches (une tâche par chunk)
+  const tasks = chunks.map(chunk => async () => {
+    console.log(`🔍 Traitement du chunk ${chunk.id} (${chunk.startTime}s - ${chunk.endTime}s)`);
     
     try {
       // Sauvegarder le prompt pour ce chunk
@@ -91,7 +94,7 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
       const parsedData = JSON.parse(cleanedJson);
       if (!parsedData.claims || !Array.isArray(parsedData.claims)) {
         console.warn(`Chunk ${chunk.id}: Aucun claim trouvé ou structure JSON invalide`);
-        continue;
+        return [];
       }
 
       // Traiter les claims de ce chunk (sans raffinage, on fait confiance au LLM)
@@ -99,8 +102,8 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
         const { claim: claimText, estimated_timestamp } = claimData;
         
         // Validation basique du timestamp
-        const timestamp = typeof estimated_timestamp === 'number' && estimated_timestamp >= 0 
-          ? estimated_timestamp 
+        const timestamp = typeof estimated_timestamp === 'number' && estimated_timestamp >= 0
+          ? estimated_timestamp
           : chunk.startTime; // Fallback au début du chunk si timestamp invalide
 
         return {
@@ -110,7 +113,7 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
       });
 
       console.log(`✅ Chunk ${chunk.id}: ${chunkClaims.length} claims extraits`);
-      allClaims.push(...chunkClaims);
+      return chunkClaims;
 
     } catch (error) {
       console.error(`❌ Erreur lors du traitement du chunk ${chunk.id}:`, error.message);
@@ -123,8 +126,32 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
         `extraction/chunk_${chunk.id}`
       );
       
-      // Continuer avec les autres chunks même en cas d'erreur
-      continue;
+      // Retourner un tableau vide en cas d'erreur
+      return [];
+    }
+  });
+
+  // Traiter les tâches par lots
+  for (let i = 0; i < tasks.length; i += limit) {
+    const batch = tasks.slice(i, i + limit);
+    const batchNumber = Math.floor(i / limit) + 1;
+    const totalBatches = Math.ceil(tasks.length / limit);
+    
+    console.log(`📦 Traitement du lot ${batchNumber}/${totalBatches} (${batch.length} chunks)`);
+    
+    try {
+      const batchResults = await Promise.all(batch.map(task => task()));
+      
+      // Agréger les résultats de ce lot
+      for (const chunkClaims of batchResults) {
+        allClaims.push(...chunkClaims);
+      }
+      
+      console.log(`✅ Lot ${batchNumber} terminé`);
+      
+    } catch (error) {
+      console.error(`❌ Erreur lors du traitement du lot ${batchNumber}:`, error.message);
+      // Continuer avec les autres lots même en cas d'erreur
     }
   }
 
