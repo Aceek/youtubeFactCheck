@@ -214,7 +214,7 @@ function deduplicateClaims(allClaims, chunks, paragraphs) {
 
   for (const claim of sortedClaims) {
     // Trouver à quel chunk ce claim appartient.
-    const parentChunk = chunks.find(chunk => claim.timestamp >= chunk.startTime && claim.timestamp <= chunk.endTime);
+    const parentChunk = chunks.findLast(chunk => claim.timestamp >= chunk.startTime && claim.timestamp <= chunk.endTime);
     
     if (!parentChunk) {
       // Cas peu probable, mais on le garde par sécurité.
