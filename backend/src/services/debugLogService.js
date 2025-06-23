@@ -15,7 +15,7 @@ const debugLogService = {
    * @param {string} fileName - Le nom du fichier (ex: '1_extraction_prompt.txt').
    * @param {string} content - Le contenu à écrire.
    */
-  log: (analysisId, fileName, content) => {
+  log: (analysisId, fileName, content, subfolder = null) => {
     if (!isDebugMode) {
       return;
     }
@@ -23,9 +23,15 @@ const debugLogService = {
     try {
       // Crée un sous-dossier par analyse pour une meilleure organisation
       const analysisDir = path.resolve(`./results/${analysisId}`);
-      fs.mkdirSync(analysisDir, { recursive: true });
+      
+      // Si un sous-dossier est spécifié, on l'ajoute au chemin
+      const targetDir = subfolder
+        ? path.join(analysisDir, subfolder)
+        : analysisDir;
+      
+      fs.mkdirSync(targetDir, { recursive: true });
 
-      const filePath = path.join(analysisDir, fileName);
+      const filePath = path.join(targetDir, fileName);
       fs.writeFileSync(filePath, content);
       console.log(`[DEBUG] Log sauvegardé dans : ${filePath}`);
     } catch (error) {

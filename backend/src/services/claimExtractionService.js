@@ -2,9 +2,9 @@ const { OpenAI } = require('openai');
 const fs = require('fs');
 const path = require('path');
 const prisma = require('../client');
-const debugLogService = require('./debugLogService'); // <-- NOUVEL IMPORT
-const stringSimilarity = require('string-similarity');
-const { extractJsonFromString } = require('../utils/jsonUtils'); // Import de la fonction utilitaire
+const debugLogService = require('./debugLogService');
+const { extractJsonFromString } = require('../utils/jsonUtils');
+const { chunkTranscript } = require('../utils/chunkUtils');
 
 const openrouter = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
@@ -14,171 +14,183 @@ const openrouter = new OpenAI({
 const promptPath = path.join(__dirname, '../prompts/claim_extraction.prompt.txt');
 const SYSTEM_PROMPT = fs.readFileSync(promptPath, 'utf-8');
 
-function normalizeText(text) {
-  return text.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").replace(/\s+/g, ' ').trim();
-}
-
 /**
- * AssemblyAI peut retourner des paragraphes ou des "utterances".
- * Cette fonction crée un texte balisé avec des timestamps.
- * @param {object | Array<object>} structuredContent - Le contenu structuré d'AssemblyAI (peut être un objet avec 'words' ou directement un tableau de mots).
- * @returns {string} Le texte balisé pour le LLM.
- */
-function createTaggedTranscript(structuredContent) {
-    // On vérifie si la structure de paragraphes est disponible
-    if (structuredContent.paragraphs && Array.isArray(structuredContent.paragraphs) && structuredContent.paragraphs.length > 0) {
-        // NOUVELLE LOGIQUE, BIEN PLUS FIABLE
-        let taggedText = structuredContent.paragraphs.map(para => {
-            const timestamp = Math.round(para.start / 1000);
-            // On ajoute la balise au début de chaque paragraphe
-            return `[t=${timestamp}] ${para.text}`;
-        }).join('\n\n'); // On sépare les paragraphes pour plus de clarté pour le LLM
-
-        return taggedText.trim();
-    }
-
-    // Fallback : ancienne logique mot par mot
-    const wordsArray = structuredContent.words || structuredContent;
-
-    if (!Array.isArray(wordsArray)) {
-        console.error("createTaggedTranscript: L'input n'est pas un tableau de mots valide.");
-        return ""; // Retourner une chaîne vide ou lancer une erreur selon la gestion souhaitée
-    }
-
-    let taggedText = "";
-    let lastTimestamp = -1;
-    const interval = 15000; // 15 secondes en ms
-
-    wordsArray.forEach(word => {
-        if (word.start > lastTimestamp + interval) {
-            lastTimestamp = word.start;
-            taggedText += `[t=${Math.round(word.start / 1000)}] `;
-        }
-        taggedText += word.text + " ";
-    });
-    return taggedText.trim();
-}
-
-/**
- * Extraction des claims avec sauvegarde du prompt et de la réponse brute pour debug.
+ * Extraction des claims par chunks avec orchestration de multiples appels LLM
  * @param {number} analysisId - L'ID de l'analyse (pour nommer les fichiers)
  * @param {object} structuredTranscript - La transcription structurée (content)
  * @param {string} model - Le nom du modèle LLM utilisé
  */
 async function extractClaimsWithTimestamps(analysisId, structuredTranscript, model) {
-    // 1. Préparer et sauvegarder le prompt
-    const taggedText = createTaggedTranscript(structuredTranscript);
-    if (!taggedText) {
-        console.error("Transcription balisée vide. Impossible de procéder.");
-        return [];
-    }
+  console.log(`🔄 Début de l'extraction par chunks avec le modèle: ${model}`);
+  
+  // 1. Vérifier que nous avons des paragraphes
+  if (!structuredTranscript.paragraphs || !Array.isArray(structuredTranscript.paragraphs) || structuredTranscript.paragraphs.length === 0) {
+    console.error("Aucun paragraphe trouvé dans la transcription structurée");
+    return [];
+  }
 
-    // --- UTILISATION DU SERVICE DE LOG ---
-    debugLogService.log(
-      analysisId,
-      '1_extraction_prompt.txt',
-      `--- PROMPT ENVOYÉ AU MODÈLE : ${model} ---\n\n${taggedText}`
-    );
+  // 2. Récupérer les paramètres de chunking depuis l'environnement
+  const chunkSize = parseInt(process.env.CHUNK_SIZE) || 4;
+  const chunkOverlap = parseInt(process.env.CHUNK_OVERLAP) || 1;
+  
+  console.log(`📊 Configuration chunks: taille=${chunkSize}, chevauchement=${chunkOverlap}`);
 
-    // 2. Appeler le LLM et sauvegarder la réponse BRUTE
-    let rawJson = null;
-    let responseSuccess = false;
+  // 3. Découper la transcription en chunks
+  const chunks = chunkTranscript(structuredTranscript.paragraphs, chunkSize, chunkOverlap);
+  
+  if (chunks.length === 0) {
+    console.warn("Aucun chunk généré à partir de la transcription");
+    return [];
+  }
+
+  console.log(`📦 ${chunks.length} chunks générés pour l'extraction`);
+
+  // 4. Traiter chaque chunk et collecter tous les claims
+  const allClaims = [];
+  
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    console.log(`🔍 Traitement du chunk ${i + 1}/${chunks.length} (${chunk.startTime}s - ${chunk.endTime}s)`);
+    
     try {
-        const response = await openrouter.chat.completions.create({
-            model: model,
-            messages: [
-                { role: "system", content: SYSTEM_PROMPT },
-                { role: "user", content: taggedText }
-            ],
-            response_format: { type: "json_object" },
-        });
+      // Sauvegarder le prompt pour ce chunk
+      const chunkSubfolder = `extraction/chunk_${chunk.id}`;
+      debugLogService.log(
+        analysisId,
+        '1_prompt.txt',
+        `--- PROMPT ENVOYÉ AU MODÈLE : ${model} ---\n--- CHUNK ${chunk.id} (${chunk.startTime}s - ${chunk.endTime}s) ---\n\n${chunk.text}`,
+        chunkSubfolder
+      );
 
-        rawJson = response.choices[0].message.content;
-        responseSuccess = true; // On marque la réponse comme réussie ici
+      // Appel au LLM pour ce chunk
+      const response = await openrouter.chat.completions.create({
+        model: model,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: chunk.text }
+        ],
+        response_format: { type: "json_object" },
+      });
 
-        // 3. Tenter de parser le JSON (c'est ici que l'erreur se produit)
-        const cleanedJson = extractJsonFromString(rawJson);
+      const rawJson = response.choices[0].message.content;
+      
+      // Sauvegarder la réponse brute
+      debugLogService.log(
+        analysisId,
+        '2_response.txt',
+        rawJson,
+        chunkSubfolder
+      );
 
-        if (!cleanedJson) {
-            throw new Error("Aucun objet JSON valide n'a pu être extrait de la réponse du LLM.");
-        }
+      // Parser la réponse JSON
+      const cleanedJson = extractJsonFromString(rawJson);
+      if (!cleanedJson) {
+        throw new Error("Aucun objet JSON valide n'a pu être extrait de la réponse du LLM.");
+      }
 
-        const parsedData = JSON.parse(cleanedJson);
-        if (!parsedData.claims || !Array.isArray(parsedData.claims)) {
-            throw new Error("Le JSON parsé n'a pas la structure attendue.");
-        }
+      const parsedData = JSON.parse(cleanedJson);
+      if (!parsedData.claims || !Array.isArray(parsedData.claims)) {
+        console.warn(`Chunk ${chunk.id}: Aucun claim trouvé ou structure JSON invalide`);
+        continue;
+      }
 
-        console.log(`${parsedData.claims.length} affirmations brutes extraites. Raffinage des timestamps...`);
+      // Traiter les claims de ce chunk (sans raffinage, on fait confiance au LLM)
+      const chunkClaims = parsedData.claims.map(claimData => {
+        const { claim: claimText, estimated_timestamp } = claimData;
+        
+        // Validation basique du timestamp
+        const timestamp = typeof estimated_timestamp === 'number' && estimated_timestamp >= 0 
+          ? estimated_timestamp 
+          : chunk.startTime; // Fallback au début du chunk si timestamp invalide
 
-        // --- NOUVELLE LOGIQUE DE RAFFINAGE PLUS ROBUSTE ---
-        const claimsWithTimestamps = parsedData.claims.map(claimData => {
-            const { claim: claimText, estimated_timestamp } = claimData;
-            if (typeof estimated_timestamp !== 'number') {
-                return { text: claimText, timestamp: 0 };
-            }
+        return {
+          text: claimText,
+          timestamp: timestamp
+        };
+      });
 
-            const searchWindowStart = Math.max(0, estimated_timestamp - 10);
-            const searchWindowEnd = estimated_timestamp + 10;
-            
-            const wordsArray = structuredTranscript.words || structuredTranscript;
+      console.log(`✅ Chunk ${chunk.id}: ${chunkClaims.length} claims extraits`);
+      allClaims.push(...chunkClaims);
 
-            const windowWords = wordsArray.filter(word => {
-                const wordTime = word.start / 1000;
-                return wordTime >= searchWindowStart && wordTime <= searchWindowEnd;
-            });
-
-            if (windowWords.length === 0) {
-                console.warn(`⚠️ Fenêtre de recherche vide pour le timestamp ${estimated_timestamp}. Utilisation du timestamp estimé.`);
-                return { text: claimText, timestamp: estimated_timestamp };
-            }
-            
-            const claimWords = normalizeText(claimText).split(' ');
-            const windowText = windowWords.map(w => normalizeText(w.text)).join(' ');
-
-            let bestMatch = { score: 0, timestamp: estimated_timestamp };
-
-            for (let i = 0; i < claimWords.length; i++) {
-                for (let j = i + 1; j <= claimWords.length; j++) {
-                    const subSequence = claimWords.slice(i, j).join(' ');
-                    if (subSequence.length < 5) continue;
-
-                    if (windowText.includes(subSequence)) {
-                        const score = subSequence.length / claimText.length;
-                        if (score > bestMatch.score) {
-                            bestMatch.score = score;
-                            bestMatch.timestamp = Math.round(windowWords[0].start / 1000);
-                        }
-                    }
-                }
-            }
-            
-            const CONFIDENCE_THRESHOLD = 0.5;
-            if (bestMatch.score >= CONFIDENCE_THRESHOLD) {
-                console.log(`✅ Raffinage partiel réussi pour "${claimText.substring(0,20)}..." (Score: ${bestMatch.score.toFixed(2)})`);
-                return { text: claimText, timestamp: bestMatch.timestamp };
-            }
-            
-            console.warn(`⚠️ Échec du raffinage pour "${claimText.substring(0,20)}...". Utilisation du timestamp estimé.`);
-            return { text: claimText, timestamp: estimated_timestamp };
-        });
-
-        return claimsWithTimestamps;
-
-    } catch (e) {
-        console.error("Erreur de parsing ou d'appel LLM:", e.message);
-        // On propage l'erreur pour que le service appelant (videoService) puisse la gérer
-        throw e;
-    } finally {
-        // Ce bloc s'exécute toujours, succès ou échec du try.
-        if (rawJson) {
-            const fileName = responseSuccess
-                ? '2_extraction_response.txt'
-                : '2_extraction_response_FAILED.txt';
-            debugLogService.log(analysisId, fileName, rawJson);
-        }
+    } catch (error) {
+      console.error(`❌ Erreur lors du traitement du chunk ${chunk.id}:`, error.message);
+      
+      // Sauvegarder l'erreur pour debug
+      debugLogService.log(
+        analysisId,
+        '2_response_FAILED.txt',
+        `ERREUR: ${error.message}`,
+        `extraction/chunk_${chunk.id}`
+      );
+      
+      // Continuer avec les autres chunks même en cas d'erreur
+      continue;
     }
+  }
+
+  console.log(`📋 Total avant dédoublonnage: ${allClaims.length} claims`);
+
+  // 5. Dédoublonnage des claims (à cause du chevauchement)
+  const uniqueClaims = deduplicateClaims(allClaims);
+  
+  console.log(`✨ Total après dédoublonnage: ${uniqueClaims.length} claims uniques`);
+  
+  // 6. Sauvegarder un résumé de l'extraction
+  const extractionSummary = {
+    totalChunks: chunks.length,
+    chunkSize: chunkSize,
+    chunkOverlap: chunkOverlap,
+    model: model,
+    totalClaimsBeforeDedup: allClaims.length,
+    totalClaimsAfterDedup: uniqueClaims.length,
+    extractionTimestamp: new Date().toISOString(),
+    chunks: chunks.map(chunk => ({
+      id: chunk.id,
+      startTime: chunk.startTime,
+      endTime: chunk.endTime,
+      claimsExtracted: allClaims.filter(claim => 
+        claim.timestamp >= chunk.startTime && claim.timestamp <= chunk.endTime
+      ).length
+    }))
+  };
+
+  debugLogService.log(
+    analysisId,
+    'extraction_summary.json',
+    JSON.stringify(extractionSummary, null, 2),
+    'extraction'
+  );
+
+  return uniqueClaims;
 }
 
+/**
+ * Dédoublonne les claims basé sur le texte et le timestamp
+ * @param {Array} claims - Liste des claims potentiellement dupliqués
+ * @returns {Array} Claims uniques
+ */
+function deduplicateClaims(claims) {
+  const seen = new Set();
+  const uniqueClaims = [];
+
+  for (const claim of claims) {
+    // Créer une clé unique basée sur le texte normalisé et le timestamp
+    const normalizedText = claim.text.toLowerCase().trim();
+    const key = `${normalizedText}|${claim.timestamp}`;
+    
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueClaims.push(claim);
+    }
+  }
+
+  const duplicatesRemoved = claims.length - uniqueClaims.length;
+  if (duplicatesRemoved > 0) {
+    console.log(`🔄 ${duplicatesRemoved} doublons supprimés lors du dédoublonnage`);
+  }
+
+  return uniqueClaims;
+}
 
 /**
  * MODIFICATION : Simule l'extraction des "claims" avec des timestamps.
@@ -213,6 +225,5 @@ async function mockExtractClaimsFromText() {
 
   return selectedClaims;
 }
-
 
 module.exports = { extractClaimsWithTimestamps, mockExtractClaimsFromText };

@@ -2,7 +2,8 @@ const { PrismaClient } = require("@prisma/client");
 const axios = require("axios");
 const { spawn } = require("child_process");
 const claimExtractionService = require("./claimExtractionService");
-const { validateClaim, mockValidateClaim } = require("./claimValidationService");
+const { validateClaimsChunk, validateClaim, mockValidateClaim } = require("./claimValidationService");
+const { chunkTranscript, getClaimsForChunk } = require("../utils/chunkUtils");
 const fs = require('fs');
 const path = require('path');
 const debugLogService = require('./debugLogService');
@@ -326,63 +327,18 @@ async function runClaimExtractionProcess(analysisId, transcription, provider, wi
       });
     }
 
-    if (withValidation) {
-      await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'VALIDATING_CLAIMS' } });
-      const createdClaims = await prisma.claim.findMany({
-        where: { analysisId },
-        orderBy: { timestamp: 'asc' }
-      });
-      console.log(`Lancement de la validation pour ${createdClaims.length} affirmations...`);
-      
-      const validationReport = [];
+    // Récupérer les claims créés pour la validation
+    const createdClaims = await prisma.claim.findMany({
+      where: { analysisId },
+      orderBy: { timestamp: 'asc' }
+    });
 
-      const CONCURRENCY_LIMIT = 8; // Limite de 8 requêtes simultanées pour éviter de surcharger l'API
-
-      const validationTasks = createdClaims.map(claim => async () => {
-        const validationFunction = provider === 'MOCK_PROVIDER'
-          ? mockValidateClaim(claim)
-          : validateClaim(claim, transcription.content.paragraphs);
-        
-        const { validationResult, usedContext } = await validationFunction;
-
-        validationReport.push({
-          claim_text: claim.text,
-          original_context: usedContext,
-          validation_result: validationResult,
-        });
-
-        return prisma.claim.update({
-          where: { id: claim.id },
-          data: {
-            validationStatus: validationResult.validationStatus,
-            validationExplanation: validationResult.explanation,
-            validationScore: validationResult.validationScore,
-          }
-        });
-      });
-
-      for (let i = 0; i < validationTasks.length; i += CONCURRENCY_LIMIT) {
-          const batch = validationTasks.slice(i, i + CONCURRENCY_LIMIT);
-          await Promise.all(batch.map(task => task()));
-          if (i + CONCURRENCY_LIMIT < validationTasks.length) {
-            await sleep(1000); // Ajoute une pause d'1 seconde entre les lots pour ménager l'API
-          }
-      }
-
-      validationReport.sort((a, b) => {
-        const indexA = createdClaims.findIndex(c => c.text === a.claim_text);
-        const indexB = createdClaims.findIndex(c => c.text === b.claim_text);
-        return indexA - indexB;
-      });
-
-      debugLogService.log(
-        analysisId,
-        '3_validation_report.json',
-        JSON.stringify(validationReport, null, 2)
-      );
-      
-      console.log("✅ Validation terminée.");
+    if (withValidation && createdClaims.length > 0) {
+      await runClaimValidationProcess(analysisId, createdClaims, transcription.content.paragraphs, provider);
     }
+    
+    // Générer le rapport final
+    await generateFinalReport(analysisId);
     
     await prisma.analysis.update({
       where: { id: analysisId },
@@ -392,6 +348,274 @@ async function runClaimExtractionProcess(analysisId, transcription, provider, wi
   } catch (error) {
     console.error(`Échec du processus d'extraction ou de validation pour l'analyse ${analysisId}:`, error);
     await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'FAILED', errorMessage: `Erreur critique : ${error.message}` } });
+  }
+}
+
+/**
+ * Nouvelle fonction pour orchestrer la validation des claims par chunks
+ * @param {number} analysisId - ID de l'analyse
+ * @param {Array} claims - Liste des claims à valider
+ * @param {Array} paragraphs - Paragraphes de la transcription
+ * @param {string} provider - Provider utilisé (pour le mode mock)
+ */
+async function runClaimValidationProcess(analysisId, claims, paragraphs, provider) {
+  console.log(`🔍 Début de la validation par chunks pour ${claims.length} claims`);
+  
+  await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'VALIDATING_CLAIMS' } });
+
+  if (provider === 'MOCK_PROVIDER') {
+    // Mode mock : utiliser l'ancienne logique
+    console.log('Mode MOCK_PROVIDER: Utilisation de la validation simulée');
+    
+    const validationReport = [];
+    for (const claim of claims) {
+      const { validationResult, usedContext } = await mockValidateClaim(claim);
+      
+      validationReport.push({
+        claim_text: claim.text,
+        original_context: usedContext,
+        validation_result: validationResult,
+      });
+
+      await prisma.claim.update({
+        where: { id: claim.id },
+        data: {
+          validationStatus: validationResult.validationStatus,
+          validationExplanation: validationResult.explanation,
+          validationScore: validationResult.validationScore,
+        }
+      });
+    }
+
+    debugLogService.log(
+      analysisId,
+      '3_validation_report.json',
+      JSON.stringify(validationReport, null, 2)
+    );
+    
+    console.log("✅ Validation simulée terminée.");
+    return;
+  }
+
+  // Mode réel : nouvelle logique par chunks
+  const chunkSize = parseInt(process.env.CHUNK_SIZE) || 4;
+  const chunkOverlap = parseInt(process.env.CHUNK_OVERLAP) || 1;
+  
+  // Recréer les mêmes chunks que pour l'extraction
+  const chunks = chunkTranscript(paragraphs, chunkSize, chunkOverlap);
+  const validationModel = process.env.VALIDATION_MODEL || "mistralai/mistral-7b-instruct:free";
+  
+  console.log(`📦 ${chunks.length} chunks générés pour la validation`);
+
+  const allValidationResults = [];
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    
+    // Trouver tous les claims qui appartiennent à ce chunk
+    const claimsInChunk = getClaimsForChunk(claims, chunk);
+    
+    if (claimsInChunk.length === 0) {
+      console.log(`⏭️ Chunk ${chunk.id}: Aucun claim à valider`);
+      continue;
+    }
+
+    console.log(`🔍 Chunk ${chunk.id}: Validation de ${claimsInChunk.length} claims (${chunk.startTime}s - ${chunk.endTime}s)`);
+
+    try {
+      // Valider tous les claims de ce chunk en une seule fois
+      const chunkValidationResults = await validateClaimsChunk(claimsInChunk, chunk.text, validationModel);
+      
+      // Sauvegarder les résultats pour ce chunk
+      const chunkReport = {
+        chunkId: chunk.id,
+        chunkTimeRange: `${chunk.startTime}s - ${chunk.endTime}s`,
+        claimsValidated: claimsInChunk.length,
+        validationResults: chunkValidationResults,
+        chunkContext: chunk.text
+      };
+
+      debugLogService.log(
+        analysisId,
+        'report.json',
+        JSON.stringify(chunkReport, null, 2),
+        `validation/chunk_${chunk.id}`
+      );
+
+      // Mettre à jour la base de données pour tous les claims de ce chunk
+      for (const result of chunkValidationResults) {
+        await prisma.claim.update({
+          where: { id: result.claimId },
+          data: {
+            validationStatus: result.validationStatus,
+            validationExplanation: result.explanation,
+            validationScore: result.validationScore,
+          }
+        });
+      }
+
+      allValidationResults.push(...chunkValidationResults);
+      console.log(`✅ Chunk ${chunk.id}: ${chunkValidationResults.length} validations terminées`);
+
+    } catch (error) {
+      console.error(`❌ Erreur lors de la validation du chunk ${chunk.id}:`, error.message);
+      
+      // Créer des résultats d'erreur pour tous les claims de ce chunk
+      const errorResults = claimsInChunk.map(claim => ({
+        claimId: claim.id,
+        validationStatus: 'INACCURATE',
+        explanation: `Erreur lors de la validation du chunk: ${error.message}`,
+        validationScore: 0
+      }));
+
+      // Mettre à jour la base de données même en cas d'erreur
+      for (const result of errorResults) {
+        await prisma.claim.update({
+          where: { id: result.claimId },
+          data: {
+            validationStatus: result.validationStatus,
+            validationExplanation: result.explanation,
+            validationScore: result.validationScore,
+          }
+        });
+      }
+
+      allValidationResults.push(...errorResults);
+    }
+
+    // Petite pause entre les chunks pour ménager l'API
+    if (i < chunks.length - 1) {
+      await sleep(1000);
+    }
+  }
+
+  // Créer un rapport de validation global
+  const globalValidationReport = {
+    totalClaims: claims.length,
+    totalChunks: chunks.length,
+    validationModel: validationModel,
+    validationTimestamp: new Date().toISOString(),
+    results: allValidationResults.map(result => {
+      const claim = claims.find(c => c.id === result.claimId);
+      return {
+        claim_text: claim?.text || 'Claim non trouvé',
+        claim_timestamp: claim?.timestamp || 0,
+        validation_result: {
+          validationStatus: result.validationStatus,
+          explanation: result.explanation,
+          validationScore: result.validationScore
+        }
+      };
+    })
+  };
+
+  debugLogService.log(
+    analysisId,
+    '3_validation_report.json',
+    JSON.stringify(globalValidationReport, null, 2)
+  );
+
+  console.log(`✅ Validation par chunks terminée: ${allValidationResults.length} claims validés`);
+}
+
+/**
+ * Génère un rapport final exhaustif de l'analyse
+ * @param {number} analysisId - ID de l'analyse
+ */
+async function generateFinalReport(analysisId) {
+  console.log(`📋 Génération du rapport final pour l'analyse ${analysisId}`);
+  
+  try {
+    // Récupérer toutes les données de l'analyse avec les relations
+    const completeAnalysis = await prisma.analysis.findUnique({
+      where: { id: analysisId },
+      include: {
+        video: true,
+        transcription: true,
+        claims: {
+          orderBy: { timestamp: 'asc' }
+        }
+      }
+    });
+
+    if (!completeAnalysis) {
+      throw new Error(`Analyse ${analysisId} non trouvée`);
+    }
+
+    // Construire le rapport final
+    const finalReport = {
+      analysis: {
+        id: completeAnalysis.id,
+        status: completeAnalysis.status,
+        llmModel: completeAnalysis.llmModel,
+        createdAt: completeAnalysis.createdAt,
+        updatedAt: completeAnalysis.updatedAt,
+        errorMessage: completeAnalysis.errorMessage
+      },
+      video: {
+        id: completeAnalysis.video.id,
+        youtubeUrl: completeAnalysis.video.youtubeUrl,
+        title: completeAnalysis.video.title,
+        author: completeAnalysis.video.author,
+        description: completeAnalysis.video.description,
+        publishedAt: completeAnalysis.video.publishedAt,
+        thumbnailUrl: completeAnalysis.video.thumbnailUrl
+      },
+      transcription: {
+        id: completeAnalysis.transcription?.id,
+        provider: completeAnalysis.transcription?.provider,
+        fullTextLength: completeAnalysis.transcription?.fullText?.length || 0,
+        paragraphsCount: completeAnalysis.transcription?.content?.paragraphs?.length || 0
+      },
+      claims: {
+        total: completeAnalysis.claims.length,
+        byStatus: completeAnalysis.claims.reduce((acc, claim) => {
+          const status = claim.validationStatus || 'NOT_VALIDATED';
+          acc[status] = (acc[status] || 0) + 1;
+          return acc;
+        }, {}),
+        details: completeAnalysis.claims.map(claim => ({
+          id: claim.id,
+          text: claim.text,
+          timestamp: claim.timestamp,
+          validationStatus: claim.validationStatus,
+          validationExplanation: claim.validationExplanation,
+          validationScore: claim.validationScore
+        }))
+      },
+      summary: {
+        extractionModel: completeAnalysis.llmModel,
+        validationModel: process.env.VALIDATION_MODEL || null,
+        chunkSize: parseInt(process.env.CHUNK_SIZE) || null,
+        chunkOverlap: parseInt(process.env.CHUNK_OVERLAP) || null,
+        reportGeneratedAt: new Date().toISOString()
+      }
+    };
+
+    // Sauvegarder le rapport final
+    debugLogService.log(
+      analysisId,
+      'final_analysis_report.json',
+      JSON.stringify(finalReport, null, 2)
+    );
+
+    console.log(`✅ Rapport final généré avec succès pour l'analyse ${analysisId}`);
+
+  } catch (error) {
+    console.error(`❌ Erreur lors de la génération du rapport final:`, error.message);
+    
+    // Sauvegarder un rapport d'erreur minimal
+    const errorReport = {
+      analysisId: analysisId,
+      error: error.message,
+      reportGeneratedAt: new Date().toISOString()
+    };
+
+    debugLogService.log(
+      analysisId,
+      'final_analysis_report_ERROR.json',
+      JSON.stringify(errorReport, null, 2)
+    );
   }
 }
 
