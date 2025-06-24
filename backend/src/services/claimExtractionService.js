@@ -54,40 +54,30 @@ async function callLLMWithRetry(apiCall, maxRetries, delayMs, context) {
 async function extractClaimsWithTimestamps(analysisId, structuredTranscript, model) {
   console.log(`🔄 Début de l'extraction par chunks avec le modèle: ${model}`);
   
-  // 1. Vérifier que nous avons des paragraphes
   if (!structuredTranscript.paragraphs || !Array.isArray(structuredTranscript.paragraphs) || structuredTranscript.paragraphs.length === 0) {
     console.error("Aucun paragraphe trouvé dans la transcription structurée");
-    return [];
+    return;
   }
 
-  // 2. Récupérer les paramètres de chunking depuis l'environnement
   const chunkSize = parseInt(process.env.CHUNK_SIZE) || 4;
   const chunkOverlap = parseInt(process.env.CHUNK_OVERLAP) || 1;
-  
-  console.log(`📊 Configuration chunks: taille=${chunkSize}, chevauchement=${chunkOverlap}`);
-
-  // 3. Découper la transcription en chunks
-  const chunks = chunkTranscript(structuredTranscript.paragraphs, chunkSize, chunkOverlap);
-  
-  if (chunks.length === 0) {
-    console.warn("Aucun chunk généré à partir de la transcription");
-    return [];
-  }
-
-  console.log(`📦 ${chunks.length} chunks générés pour l'extraction`);
-
-  // 4. Récupérer les paramètres de retry
   const maxRetries = parseInt(process.env.LLM_RETRY_COUNT) || 1;
   const retryDelay = parseInt(process.env.LLM_RETRY_DELAY_MS) || 2000;
-  
-  console.log(`🔄 Configuration retry: ${maxRetries} tentatives max, délai ${retryDelay}ms`);
-
-  // 5. Traiter les chunks par lots avec sauvegarde progressive
   const limit = parseInt(process.env.CONCURRENT_CHUNK_LIMIT) || 3;
   
-  console.log(`🚀 Traitement par lots avec une limite de ${limit} chunks simultanés`);
+  const chunks = chunkTranscript(structuredTranscript.paragraphs, chunkSize, chunkOverlap);
+  if (chunks.length === 0) {
+    console.warn("Aucun chunk généré à partir de la transcription");
+    return;
+  }
+  
+  console.log(`📦 ${chunks.length} chunks générés pour l'extraction`);
+  console.log(`🚀 Traitement par lots : limite=${limit}, retries=${maxRetries}`);
 
-  // Créer un tableau de tâches (une tâche par chunk)
+  // NOUVELLE LOGIQUE : Utiliser un Set pour suivre les timestamps des paragraphes déjà traités
+  const processedParagraphTimestamps = new Set();
+  let processedChunks = 0;
+
   const tasks = chunks.map(chunk => async () => {
     console.log(`🔍 Traitement du chunk ${chunk.id} (${chunk.startTime}s - ${chunk.endTime}s)`);
     
@@ -101,68 +91,89 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
       chunkSubfolder
     );
 
-    // Définir la fonction d'appel API pour le retry
-    const apiCall = async () => {
-      const response = await openrouter.chat.completions.create({
-        model: model,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: chunk.text }
-        ],
-        response_format: { type: "json_object" },
-      });
-
-      const rawJson = response.choices[0].message.content;
-      
-      // Sauvegarder la réponse brute
-      debugLogService.log(
-        analysisId,
-        '2_response.txt',
-        rawJson,
-        chunkSubfolder
-      );
-
-      // Parser la réponse JSON
-      const cleanedJson = extractJsonFromString(rawJson);
-      if (!cleanedJson) {
-        throw new Error("Aucun objet JSON valide n'a pu être extrait de la réponse du LLM.");
-      }
-
-      const parsedData = JSON.parse(cleanedJson);
-      if (!parsedData.claims || !Array.isArray(parsedData.claims)) {
-        console.warn(`Chunk ${chunk.id}: Aucun claim trouvé ou structure JSON invalide`);
-        return [];
-      }
-
-      // Traiter les claims de ce chunk
-      const chunkClaims = parsedData.claims.map(claimData => {
-        const { claim: claimText, estimated_timestamp } = claimData;
-        
-        // Validation basique du timestamp
-        const timestamp = typeof estimated_timestamp === 'number' && estimated_timestamp >= 0
-          ? estimated_timestamp
-          : chunk.startTime; // Fallback au début du chunk si timestamp invalide
-
-        return {
-          text: claimText,
-          timestamp: timestamp
-        };
-      });
-
-      console.log(`✅ Chunk ${chunk.id}: ${chunkClaims.length} claims extraits`);
-      return chunkClaims;
-    };
-
     try {
-      // Appel avec système de retry
-      return await callLLMWithRetry(
-        apiCall,
-        maxRetries,
-        retryDelay,
-        `Chunk ${chunk.id}`
+      const apiCall = async () => {
+        const response = await openrouter.chat.completions.create({
+          model: model,
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: chunk.text }
+          ],
+          response_format: { type: "json_object" },
+        });
+
+        if (!response.choices || response.choices.length === 0) {
+          throw new Error("La réponse de l'API LLM ne contient pas de 'choices' valides.");
+        }
+
+        const rawJson = response.choices[0].message.content;
+        
+        // Sauvegarder la réponse brute
+        debugLogService.log(
+          analysisId,
+          '2_response.txt',
+          rawJson,
+          chunkSubfolder
+        );
+
+        // Parser la réponse JSON
+        const cleanedJson = extractJsonFromString(rawJson);
+        if (!cleanedJson) {
+          throw new Error("Aucun objet JSON valide n'a pu être extrait de la réponse du LLM.");
+        }
+
+        const parsedData = JSON.parse(cleanedJson);
+        if (!parsedData.claims || !Array.isArray(parsedData.claims)) {
+          console.warn(`Chunk ${chunk.id}: Aucun claim trouvé ou structure JSON invalide`);
+          return [];
+        }
+
+        return parsedData.claims.map(claimData => ({
+          text: claimData.claim,
+          timestamp: typeof claimData.estimated_timestamp === 'number' && claimData.estimated_timestamp >= 0
+            ? claimData.estimated_timestamp
+            : chunk.startTime
+        }));
+      };
+
+      const rawClaimsFromChunk = await callLLMWithRetry(
+        apiCall, maxRetries, retryDelay, `Chunk ${chunk.id}`
       );
+      
+      console.log(`✅ Chunk ${chunk.id}: ${rawClaimsFromChunk.length} claims bruts extraits`);
+
+      // NOUVELLE LOGIQUE DE FILTRAGE
+      const uniqueClaimsForChunk = [];
+      const newParagraphTimestampsInChunk = new Set();
+      
+      // Identifier les paragraphes uniques de ce chunk
+      const chunkParagraphs = structuredTranscript.paragraphs.slice(
+        chunk.paragraphIndices.start,
+        chunk.paragraphIndices.end + 1
+      );
+        
+      chunkParagraphs.forEach(p => {
+        const pTimestamp = Math.round(p.start / 1000);
+        if (!processedParagraphTimestamps.has(pTimestamp)) {
+          newParagraphTimestampsInChunk.add(pTimestamp);
+        }
+      });
+
+      // Filtrer les claims : on ne garde que ceux dont le timestamp correspond à un NOUVEAU paragraphe
+      for (const claim of rawClaimsFromChunk) {
+        if (newParagraphTimestampsInChunk.has(claim.timestamp)) {
+          uniqueClaimsForChunk.push(claim);
+        }
+      }
+
+      // Marquer les nouveaux paragraphes de ce chunk comme traités pour les prochains chunks
+      newParagraphTimestampsInChunk.forEach(ts => processedParagraphTimestamps.add(ts));
+
+      console.log(`✨ Chunk ${chunk.id}: ${uniqueClaimsForChunk.length} claims uniques conservés après filtrage.`);
+      return uniqueClaimsForChunk;
+
     } catch (error) {
-      console.error(`💥 Échec définitif du chunk ${chunk.id} après ${maxRetries} tentatives:`, error.message);
+      console.error(`💥 Échec définitif du chunk ${chunk.id}:`, error.message);
       
       // Sauvegarder l'erreur pour debug
       debugLogService.log(
@@ -172,107 +183,48 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
         chunkSubfolder
       );
       
-      // Retourner un tableau vide en cas d'échec définitif
       return [];
     }
   });
 
-  // 6. Traiter les tâches par lots avec sauvegarde progressive
-  const allClaims = [];
-  let processedChunks = 0;
-  
+  // La boucle de traitement des lots est maintenant plus simple
   for (let i = 0; i < tasks.length; i += limit) {
     const batch = tasks.slice(i, i + limit);
     const batchNumber = Math.floor(i / limit) + 1;
     const totalBatches = Math.ceil(tasks.length / limit);
     
-    console.log(`📦 Traitement du lot ${batchNumber}/${totalBatches} (${batch.length} chunks)`);
+    console.log(`📦 Traitement du lot ${batchNumber}/${totalBatches}`);
     
-    try {
-      const batchResults = await Promise.all(batch.map(task => task()));
-      
-      // Agréger les résultats de ce lot
-      const batchClaims = [];
-      for (const chunkClaims of batchResults) {
-        batchClaims.push(...chunkClaims);
-        allClaims.push(...chunkClaims);
-      }
-      
-      processedChunks += batch.length;
-      
-      // Calculer et mettre à jour le progrès
-      const progress = Math.round((processedChunks / chunks.length) * 100);
-      
-      console.log(`✅ Lot ${batchNumber} terminé - ${batchClaims.length} nouveaux claims`);
-      console.log(`📊 Progrès: ${processedChunks}/${chunks.length} chunks (${progress}%)`);
-      
-      // SAUVEGARDE PROGRESSIVE SIMPLIFIÉE : On sauvegarde tout, y compris les doublons potentiels
-      if (batchClaims.length > 0) {
-        await prisma.claim.createMany({
-          data: batchClaims.map(claim => ({
-            analysisId: analysisId,
-            text: claim.text,
-            timestamp: claim.timestamp,
-          })),
-          skipDuplicates: false, // On s'assure de ne pas sauter les doublons
-        });
-        
-        console.log(`💾 ${batchClaims.length} claims bruts sauvegardés en base`);
-      }
-      
-      // Mettre à jour le statut et le progrès de l'analyse
-      await prisma.analysis.update({
-        where: { id: analysisId },
-        data: {
-          status: processedChunks < chunks.length ? 'PARTIALLY_COMPLETE' : 'EXTRACTING_CLAIMS',
-          progress: progress
-        }
+    const batchResults = await Promise.all(batch.map(task => task()));
+    
+    const claimsToSave = batchResults.flat();
+    
+    processedChunks += batch.length;
+    const progress = Math.round((processedChunks / chunks.length) * 100);
+    
+    console.log(`✅ Lot ${batchNumber} terminé - ${claimsToSave.length} nouveaux claims uniques`);
+
+    if (claimsToSave.length > 0) {
+      await prisma.claim.createMany({
+        data: claimsToSave.map(claim => ({
+          analysisId: analysisId,
+          text: claim.text,
+          timestamp: claim.timestamp,
+        }))
       });
-      
-    } catch (error) {
-      console.error(`❌ Erreur lors du traitement du lot ${batchNumber}:`, error.message);
-      // Continuer avec les autres lots même en cas d'erreur
-      processedChunks += batch.length; // Compter les chunks même en cas d'erreur
+      console.log(`💾 ${claimsToSave.length} claims uniques sauvegardés en base`);
     }
+    
+    await prisma.analysis.update({
+      where: { id: analysisId },
+      data: {
+        status: processedChunks < chunks.length ? 'PARTIALLY_COMPLETE' : 'EXTRACTING_CLAIMS',
+        progress: progress
+      }
+    });
   }
 
-  console.log(`📋 Total brut avant dédoublonnage final: ${allClaims.length} claims`);
-
-  // DÉDOUBLONNAGE FINAL ET UNIQUE
-  const uniqueClaims = deduplicateClaims(allClaims, chunks, structuredTranscript.paragraphs);
-  
-  console.log(`✨ Total après dédoublonnage final: ${uniqueClaims.length} claims uniques`);
-  
-  // 8. Sauvegarder un résumé de l'extraction
-  const extractionSummary = {
-    totalChunks: chunks.length,
-    chunkSize: chunkSize,
-    chunkOverlap: chunkOverlap,
-    model: model,
-    maxRetries: maxRetries,
-    retryDelay: retryDelay,
-    totalClaimsBeforeDedup: allClaims.length,
-    totalClaimsAfterDedup: uniqueClaims.length,
-    extractionTimestamp: new Date().toISOString(),
-    chunks: chunks.map(chunk => ({
-      id: chunk.id,
-      startTime: chunk.startTime,
-      endTime: chunk.endTime,
-      claimsExtracted: allClaims.filter(claim =>
-        claim.timestamp >= chunk.startTime && claim.timestamp <= chunk.endTime
-      ).length
-    }))
-  };
-
-  debugLogService.log(
-    analysisId,
-    'extraction_summary.json',
-    JSON.stringify(extractionSummary, null, 2),
-    'extraction'
-  );
-
-  // Retourner tous les claims (ils sont déjà en base grâce à la sauvegarde progressive)
-  return uniqueClaims;
+  console.log(`🎉 Processus d'extraction terminé.`);
 }
 
 /**

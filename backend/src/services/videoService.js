@@ -158,22 +158,21 @@ async function runClaimExtractionProcess(analysisId, transcription, provider, wi
         });
       }
     } else {
-      // Le service d'extraction gère maintenant sa propre sauvegarde progressive
-      // Il retourne les claims mais ils sont déjà en base de données
-      claimsData = await claimExtractionService.extractClaimsWithTimestamps(
+      // On lance la fonction, mais on ne stocke pas son résultat (qui est undefined)
+      await claimExtractionService.extractClaimsWithTimestamps(
         analysisId,
         transcription.content,
         currentLlmModel
       );
     }
-    
-    console.log(`${claimsData.length} affirmations extraites avec le modèle ${currentLlmModel}.`);
 
     // Récupérer les claims créés pour la validation (ils sont maintenant en base)
     const createdClaims = await prisma.claim.findMany({
       where: { analysisId },
       orderBy: { timestamp: 'asc' }
     });
+
+    console.log(`🔎 ${createdClaims.length} affirmations au total ont été sauvegardées pour l'analyse ${analysisId}.`);
 
     if (withValidation && createdClaims.length > 0) {
       await runClaimValidationProcess(analysisId, createdClaims, transcription.content.paragraphs, provider);
