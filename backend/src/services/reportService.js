@@ -4,6 +4,28 @@ const prisma = require('../client');
 const debugLogService = require('./debugLogService');
 
 /**
+ * Formate une liste de paragraphes en une seule chaîne de caractères
+ * avec des balises de timestamp.
+ * @param {Array} paragraphs - La liste des paragraphes de la transcription.
+ * @returns {string} La transcription complète et formatée.
+ */
+function formatTranscriptWithTimestamps(paragraphs) {
+  if (!paragraphs || paragraphs.length === 0) {
+    return "Aucun paragraphe à formater.";
+  }
+  
+  return paragraphs.map(para => {
+    const timestamp = Math.round(para.start / 1000);
+    // Format [t=XXX] - [HH:MM:SS] Texte du paragraphe
+    const hours = Math.floor(timestamp / 3600).toString().padStart(2, '0');
+    const minutes = Math.floor((timestamp % 3600) / 60).toString().padStart(2, '0');
+    const seconds = (timestamp % 60).toString().padStart(2, '0');
+    
+    return `[t=${timestamp}] - [${hours}:${minutes}:${seconds}] ${para.text}`;
+  }).join('\n\n');
+}
+
+/**
  * Trouve le paragraphe source d'un claim basé sur son timestamp.
  * Retourne le paragraphe lui-même et un contexte de +/- 1 paragraphe.
  * @param {object} claim - L'objet claim avec un timestamp.
@@ -70,13 +92,25 @@ async function generateAndSaveFinalReport(analysisId) {
 
     const allParagraphs = completeAnalysis.transcription?.content?.paragraphs || [];
 
-    if (completeAnalysis.transcription?.fullText) {
+    // MODIFICATION ICI : On vérifie qu'on a bien des paragraphes avant de formater et sauvegarder.
+    if (allParagraphs.length > 0) {
+        // On utilise notre nouvelle fonction pour formater le texte
+        const formattedTranscript = formatTranscriptWithTimestamps(allParagraphs);
+        
+        debugLogService.log(
+            analysisId,
+            'full_transcript.txt',
+            formattedTranscript // On passe le texte formaté
+        );
+        console.log(`[DEBUG] Transcription complète et formatée sauvegardée pour l'analyse ${analysisId}`);
+    } else if (completeAnalysis.transcription?.fullText) {
+        // Fallback : si on n'a pas de paragraphes mais qu'on a du texte brut, on le sauvegarde quand même.
         debugLogService.log(
             analysisId,
             'full_transcript.txt',
             completeAnalysis.transcription.fullText
         );
-        console.log(`[DEBUG] Transcription complète sauvegardée pour l'analyse ${analysisId}`);
+        console.log(`[DEBUG] Transcription complète (brute) sauvegardée pour l'analyse ${analysisId}`);
     }
 
     const finalReport = {
