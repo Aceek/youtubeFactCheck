@@ -94,6 +94,7 @@ enum ClaimValidationStatus {
   OUT_OF_CONTEXT      // Techniquement présent, mais trompeur sans le contexte.
   HALLUCINATION       // N'est pas présent dans la transcription.
   UNVERIFIED          // La validation n'a pas encore été effectuée.
+  NOT_VERIFIABLE_CLAIM // 
 }
 
 // Enums pour standardiser les valeurs

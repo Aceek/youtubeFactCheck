@@ -3,10 +3,11 @@ import React, { useMemo, useRef, useEffect } from 'react';
 // Icônes de statut
 const ValidationIcon = ({ status, explanation }) => {
   const icons = {
-    VALID: { icon: '✅', color: 'border-green-500', title: 'Valide' },
+    VALID: { icon: '✅', color: 'border-green-500', title: 'Valide & Vérifiable' },
     INACCURATE: { icon: '⚠️', color: 'border-yellow-500', title: 'Imprécis' },
     OUT_OF_CONTEXT: { icon: '🔎', color: 'border-orange-500', title: 'Hors contexte' },
     HALLUCINATION: { icon: '👻', color: 'border-red-500', title: 'Hallucination' },
+    NOT_VERIFIABLE_CLAIM: { icon: '💬', color: 'border-gray-400', title: 'Non Vérifiable' },
     UNVERIFIED: { icon: '…', color: 'border-gray-500', title: 'Non vérifié' },
   };
   const current = icons[status] || icons.UNVERIFIED;
@@ -67,6 +68,7 @@ function ClaimList({ claims, onClaimClick, currentTime }) {
       case 'INACCURATE': return 'border-yellow-500/80';
       case 'OUT_OF_CONTEXT': return 'border-orange-500/80';
       case 'HALLUCINATION': return 'border-red-500/80';
+      case 'NOT_VERIFIABLE_CLAIM': return 'border-gray-400/80'; // <-- NOUVELLE COULEUR
       default: return 'border-fuchsia-500';
     }
   };
