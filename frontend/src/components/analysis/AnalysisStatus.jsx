@@ -98,7 +98,7 @@ function AnalysisStatus({ analysis, withValidation }) {
       {/* Barre de progression pour les étapes avec progrès */}
       {(analysis.status === 'EXTRACTING_CLAIMS' ||
         analysis.status === 'VALIDATING_CLAIMS' ||
-        analysis.status === 'PARTIALLY_COMPLETE') && progress > 0 && (
+        analysis.status === 'PARTIALLY_COMPLETE') && progress >= 0 && (
         <ProgressBar progress={progress} label={getProgressLabel()} />
       )}
       
