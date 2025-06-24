@@ -35,34 +35,52 @@ function formatTranscriptWithTimestamps(paragraphs) {
 function findClaimContext(claim, paragraphs) {
   if (!paragraphs || paragraphs.length === 0) return null;
 
-  let bestMatchIndex = -1;
-  for (let i = 0; i < paragraphs.length; i++) {
-    const paraStartSeconds = paragraphs[i].start / 1000;
-    if (paraStartSeconds <= claim.timestamp) {
-      bestMatchIndex = i;
-    } else {
-      break;
+  // On cherche le premier paragraphe pour lequel le timestamp du claim
+  // est compris entre le début et la fin du paragraphe.
+  const bestMatchIndex = paragraphs.findIndex(p => {
+    const paraStartSeconds = p.start / 1000;
+    const paraEndSeconds = p.end / 1000;
+    return claim.timestamp >= paraStartSeconds && claim.timestamp <= paraEndSeconds;
+  });
+
+  // Si aucun paragraphe ne correspond, on utilise l'ancienne logique comme fallback.
+  if (bestMatchIndex === -1) {
+    let fallbackIndex = -1;
+    for (let i = 0; i < paragraphs.length; i++) {
+      if ((paragraphs[i].start / 1000) <= claim.timestamp) {
+        fallbackIndex = i;
+      } else {
+        break;
+      }
     }
+    if (fallbackIndex === -1) return null;
+    return buildContext(fallbackIndex, paragraphs); // On externalise la construction du contexte
   }
+  
+  return buildContext(bestMatchIndex, paragraphs); // On externalise la construction du contexte
+}
 
-  if (bestMatchIndex === -1) return null;
+// Nouvelle fonction helper pour éviter la répétition
+function buildContext(index, paragraphs) {
+    // On s'assure que l'index est valide
+    if (index < 0 || index >= paragraphs.length) {
+        return null;
+    }
+    
+    const sourceParagraphObject = paragraphs[index];
 
-  const contextSlices = [];
-  if (bestMatchIndex > 0) {
-    contextSlices.push(`[${bestMatchIndex - 1}] ${paragraphs[bestMatchIndex - 1].text}`);
-  }
-  contextSlices.push(`[${bestMatchIndex}] (Source) ${paragraphs[bestMatchIndex].text}`);
-  if (bestMatchIndex < paragraphs.length - 1) {
-    contextSlices.push(`[${bestMatchIndex + 1}] ${paragraphs[bestMatchIndex + 1].text}`);
-  }
+    // On ne construit plus une fenêtre, mais on retourne uniquement le paragraphe source.
+    const sourceParagraphText = `[${index}] (Source) ${sourceParagraphObject.text}`;
 
-  return {
-    sourceParagraph: {
-      index: bestMatchIndex,
-      ...paragraphs[bestMatchIndex]
-    },
-    fullContext: contextSlices.join('\n\n---\n\n')
-  };
+    return {
+        sourceParagraph: {
+            index: index,
+            ...sourceParagraphObject
+        },
+        // Le nom de la clé est conservé pour ne pas casser la structure,
+        // mais son contenu est maintenant beaucoup plus simple.
+        fullContextText: sourceParagraphText
+    };
 }
 
 /**
@@ -152,7 +170,9 @@ async function generateAndSaveFinalReport(analysisId) {
               timestamp: claim.timestamp,
               context: {
                 sourceParagraphIndex: contextInfo?.sourceParagraph?.index ?? null,
-                fullContextText: contextInfo?.fullContext ?? "Contexte introuvable."
+                // On s'assure que la clé utilisée ici (`fullContextText`)
+                // correspond à celle retournée par `buildContext`.
+                fullContextText: contextInfo?.fullContextText ?? "Contexte introuvable."
               },
               validationStatus: claim.validationStatus,
               validationExplanation: claim.validationExplanation,
