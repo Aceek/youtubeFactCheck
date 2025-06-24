@@ -12,7 +12,37 @@ const chunkPromptPath = path.join(__dirname, '../prompts/claim_validation_chunk.
 const CHUNK_SYSTEM_PROMPT = fs.readFileSync(chunkPromptPath, 'utf-8');
 
 /**
- * Valide un ensemble de claims dans le contexte d'un chunk
+ * Fonction utilitaire pour effectuer un appel LLM avec système de retry
+ * @param {Function} apiCall - Fonction qui effectue l'appel API
+ * @param {number} maxRetries - Nombre maximum de tentatives
+ * @param {number} delayMs - Délai entre les tentatives en millisecondes
+ * @param {string} context - Contexte pour les logs
+ * @returns {Promise} Résultat de l'appel API
+ */
+async function callLLMWithRetry(apiCall, maxRetries, delayMs, context) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await apiCall();
+      if (attempt > 1) {
+        console.log(`✅ ${context}: Succès à la tentative ${attempt}/${maxRetries}`);
+      }
+      return result;
+    } catch (error) {
+      console.error(`❌ ${context}: Erreur à la tentative ${attempt}/${maxRetries}: ${error.message}`);
+      
+      if (attempt === maxRetries) {
+        console.error(`💥 ${context}: Échec définitif après ${maxRetries} tentatives`);
+        throw error;
+      }
+      
+      console.log(`⏳ ${context}: Attente de ${delayMs}ms avant la tentative ${attempt + 1}...`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
+/**
+ * Valide un ensemble de claims dans le contexte d'un chunk avec système de retry
  * @param {Array} claimsInChunk - Liste des claims à valider dans ce chunk
  * @param {string} contextText - Le texte du chunk de paragraphes correspondant
  * @param {string} model - Le modèle LLM à utiliser pour la validation
@@ -38,7 +68,14 @@ async function validateClaimsChunk(claimsInChunk, contextText, model) {
 
 Affirmations à valider: ${JSON.stringify(claimsForPrompt.map(c => ({ id: c.id, text: c.text })), null, 2)}`;
 
-  try {
+  // Récupérer les paramètres de retry
+  const maxRetries = parseInt(process.env.LLM_RETRY_COUNT) || 3;
+  const retryDelay = parseInt(process.env.LLM_RETRY_DELAY_MS) || 2000;
+  
+  console.log(`🔄 Validation avec retry: ${maxRetries} tentatives max, délai ${retryDelay}ms`);
+
+  // Définir la fonction d'appel API pour le retry
+  const apiCall = async () => {
     const response = await openrouter.chat.completions.create({
       model,
       messages: [
@@ -93,15 +130,24 @@ Affirmations à valider: ${JSON.stringify(claimsForPrompt.map(c => ({ id: c.id, 
 
     console.log(`✅ ${validationResults.length} validations traitées avec succès`);
     return validationResults;
+  };
 
+  try {
+    // Appel avec système de retry
+    return await callLLMWithRetry(
+      apiCall,
+      maxRetries,
+      retryDelay,
+      `Validation chunk (${claimsInChunk.length} claims)`
+    );
   } catch (error) {
-    console.error(`❌ Erreur de validation pour le chunk:`, error.message);
+    console.error(`💥 Échec définitif de la validation après ${maxRetries} tentatives:`, error.message);
     
     // Retourner des résultats d'erreur pour tous les claims du chunk
     const errorResults = claimsInChunk.map(claim => ({
       claimId: claim.id,
       validationStatus: 'INACCURATE',
-      explanation: `Erreur lors du processus de validation: ${error.message}`,
+      explanation: `Erreur définitive après ${maxRetries} tentatives: ${error.message}`,
       validationScore: 0
     }));
 

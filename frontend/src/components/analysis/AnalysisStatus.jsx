@@ -21,6 +21,22 @@ const DotIcon = () => (
 );
 
 
+// Composant pour la barre de progression
+const ProgressBar = ({ progress, label }) => (
+  <div className="mt-4 mb-6">
+    <div className="flex justify-between items-center mb-2">
+      <span className="text-sm text-cyan-300 font-medium">{label}</span>
+      <span className="text-sm text-cyan-300 font-bold">{progress}%</span>
+    </div>
+    <div className="w-full bg-gray-700/50 rounded-full h-3 overflow-hidden">
+      <div
+        className="h-full bg-gradient-to-r from-cyan-400 to-fuchsia-400 rounded-full transition-all duration-500 ease-out"
+        style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
+      />
+    </div>
+  </div>
+);
+
 function AnalysisStatus({ analysis, withValidation }) {
   // Sécurité : si analysis est null ou ne contient pas de status, on n'affiche rien
   if (!analysis || !analysis.status) return null;
@@ -42,13 +58,50 @@ function AnalysisStatus({ analysis, withValidation }) {
   const steps = baseSteps;
 
   // Trouver l'index de l'étape actuelle
-  const currentStepIndex = steps.findIndex(step => step.status === analysis.status);
+  let currentStepIndex = steps.findIndex(step => step.status === analysis.status);
+  
+  // Gérer le statut PARTIALLY_COMPLETE
+  if (analysis.status === 'PARTIALLY_COMPLETE') {
+    // Déterminer quelle étape est en cours selon le contexte
+    if (analysis.claims && analysis.claims.length > 0) {
+      // Si on a des claims, on est probablement en validation
+      currentStepIndex = withValidation
+        ? steps.findIndex(step => step.status === 'VALIDATING_CLAIMS')
+        : steps.findIndex(step => step.status === 'EXTRACTING_CLAIMS');
+    } else {
+      // Sinon on est en extraction
+      currentStepIndex = steps.findIndex(step => step.status === 'EXTRACTING_CLAIMS');
+    }
+  }
+
+  // Obtenir le progrès (par défaut 0 si non défini)
+  const progress = analysis.progress || 0;
+  
+  // Déterminer le label de progression
+  const getProgressLabel = () => {
+    if (analysis.status === 'EXTRACTING_CLAIMS' ||
+        (analysis.status === 'PARTIALLY_COMPLETE' && (!analysis.claims || analysis.claims.length === 0))) {
+      return 'Extraction en cours';
+    } else if (analysis.status === 'VALIDATING_CLAIMS' ||
+               (analysis.status === 'PARTIALLY_COMPLETE' && analysis.claims && analysis.claims.length > 0)) {
+      return 'Validation en cours';
+    }
+    return 'Traitement en cours';
+  };
 
   return (
     <div className="bg-black/30 p-8 rounded-xl shadow-2xl border border-cyan-400/20 backdrop-blur-lg animate-fade-in">
       <h2 className="text-2xl font-bold text-center text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-fuchsia-400 mb-6">
-        Analyse en cours...
+        {analysis.status === 'COMPLETE' ? 'Analyse terminée !' : 'Analyse en cours...'}
       </h2>
+      
+      {/* Barre de progression pour les étapes avec progrès */}
+      {(analysis.status === 'EXTRACTING_CLAIMS' ||
+        analysis.status === 'VALIDATING_CLAIMS' ||
+        analysis.status === 'PARTIALLY_COMPLETE') && progress > 0 && (
+        <ProgressBar progress={progress} label={getProgressLabel()} />
+      )}
+      
       <div className="relative space-y-6">
         {/* Ligne de progression en arrière-plan */}
         <div className="absolute left-4 top-0 h-full w-0.5 bg-cyan-400/20" />
@@ -68,22 +121,43 @@ function AnalysisStatus({ analysis, withValidation }) {
                 {visualState === 'in-progress' && <SpinnerIcon />}
                 {visualState === 'pending' && <DotIcon />}
               </div>
-              <p className={`text-lg transition-all duration-300 ${
-                visualState === 'completed' ? 'text-green-400 font-semibold' : ''
-              } ${
-                visualState === 'in-progress' ? 'text-cyan-300 font-bold scale-105' : ''
-              } ${
-                visualState === 'pending' ? 'text-gray-500' : ''
-              }`}>
-                {step.label}
-              </p>
+              <div className="flex-1">
+                <p className={`text-lg transition-all duration-300 ${
+                  visualState === 'completed' ? 'text-green-400 font-semibold' : ''
+                } ${
+                  visualState === 'in-progress' ? 'text-cyan-300 font-bold scale-105' : ''
+                } ${
+                  visualState === 'pending' ? 'text-gray-500' : ''
+                }`}>
+                  {step.label}
+                </p>
+                
+                {/* Affichage du progrès détaillé pour l'étape en cours */}
+                {visualState === 'in-progress' &&
+                 (analysis.status === 'PARTIALLY_COMPLETE' ||
+                  analysis.status === 'EXTRACTING_CLAIMS' ||
+                  analysis.status === 'VALIDATING_CLAIMS') &&
+                 progress > 0 && (
+                  <p className="text-sm text-cyan-400/80 mt-1">
+                    {progress}% terminé
+                    {analysis.claims && analysis.claims.length > 0 &&
+                     ` • ${analysis.claims.length} affirmation${analysis.claims.length > 1 ? 's' : ''} trouvée${analysis.claims.length > 1 ? 's' : ''}`}
+                  </p>
+                )}
+              </div>
             </div>
           );
         })}
       </div>
+      
       {analysis.status === 'FAILED' && (
         <p className="mt-6 text-center text-red-400 font-bold text-lg animate-pulse">
           L'analyse a échoué. Veuillez vérifier l'URL et réessayer.
+          {analysis.errorMessage && (
+            <span className="block text-sm text-red-300 mt-2 font-normal">
+              {analysis.errorMessage}
+            </span>
+          )}
         </p>
       )}
     </div>

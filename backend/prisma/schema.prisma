@@ -32,11 +32,12 @@ model Analysis {
   videoId         String
   status          Status   @default(PENDING) // Pour suivre l'état de l'analyse (PENDING, TRANSCRIBING, EXTRACTING_CLAIMS, COMPLETE, FAILED)
   
-  // --- NOUVEAU CHAMP ---
   // Stocke le nom du modèle utilisé pour l'extraction des 'claims' (ex: "mistralai/mistral-7b-instruct:free")
   llmModel        String?
   // --- ERREURS NON-BLOQUANTES ---
   errorMessage    String?  @db.Text
+
+  progress        Int      @default(0) // Pourcentage de complétion de l'étape en cours (0-100)
 
   confidenceScore Float?   // Score de confiance global de la vidéo pour cette analyse
   transcription   Transcription?
@@ -104,6 +105,7 @@ enum Status {
  TRANSCRIBING
  EXTRACTING_CLAIMS
  VALIDATING_CLAIMS // <-- NOUVEAU STATUT
+ PARTIALLY_COMPLETE // <-- NOUVEAU STATUT POUR LE CHARGEMENT PROGRESSIF
  COMPLETE
  FAILED
 }

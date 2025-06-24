@@ -15,7 +15,38 @@ const promptPath = path.join(__dirname, '../prompts/claim_extraction.prompt.txt'
 const SYSTEM_PROMPT = fs.readFileSync(promptPath, 'utf-8');
 
 /**
+ * Fonction utilitaire pour effectuer un appel LLM avec système de retry
+ * @param {Function} apiCall - Fonction qui effectue l'appel API
+ * @param {number} maxRetries - Nombre maximum de tentatives
+ * @param {number} delayMs - Délai entre les tentatives en millisecondes
+ * @param {string} context - Contexte pour les logs (ex: "chunk 1")
+ * @returns {Promise} Résultat de l'appel API
+ */
+async function callLLMWithRetry(apiCall, maxRetries, delayMs, context) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await apiCall();
+      if (attempt > 1) {
+        console.log(`✅ ${context}: Succès à la tentative ${attempt}/${maxRetries}`);
+      }
+      return result;
+    } catch (error) {
+      console.error(`❌ ${context}: Erreur à la tentative ${attempt}/${maxRetries}: ${error.message}`);
+      
+      if (attempt === maxRetries) {
+        console.error(`💥 ${context}: Échec définitif après ${maxRetries} tentatives`);
+        throw error;
+      }
+      
+      console.log(`⏳ ${context}: Attente de ${delayMs}ms avant la tentative ${attempt + 1}...`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
+/**
  * Extraction des claims par chunks avec orchestration de multiples appels LLM
+ * Maintenant avec sauvegarde progressive et système de retry
  * @param {number} analysisId - L'ID de l'analyse (pour nommer les fichiers)
  * @param {object} structuredTranscript - La transcription structurée (content)
  * @param {string} model - Le nom du modèle LLM utilisé
@@ -45,8 +76,13 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
 
   console.log(`📦 ${chunks.length} chunks générés pour l'extraction`);
 
-  // 4. Traiter les chunks par lots et collecter tous les claims
-  const allClaims = [];
+  // 4. Récupérer les paramètres de retry
+  const maxRetries = parseInt(process.env.LLM_RETRY_COUNT) || 1;
+  const retryDelay = parseInt(process.env.LLM_RETRY_DELAY_MS) || 2000;
+  
+  console.log(`🔄 Configuration retry: ${maxRetries} tentatives max, délai ${retryDelay}ms`);
+
+  // 5. Traiter les chunks par lots avec sauvegarde progressive
   const limit = parseInt(process.env.CONCURRENT_CHUNK_LIMIT) || 3;
   
   console.log(`🚀 Traitement par lots avec une limite de ${limit} chunks simultanés`);
@@ -55,17 +91,18 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
   const tasks = chunks.map(chunk => async () => {
     console.log(`🔍 Traitement du chunk ${chunk.id} (${chunk.startTime}s - ${chunk.endTime}s)`);
     
-    try {
-      // Sauvegarder le prompt pour ce chunk
-      const chunkSubfolder = `extraction/chunk_${chunk.id}`;
-      debugLogService.log(
-        analysisId,
-        '1_prompt.txt',
-        `--- PROMPT ENVOYÉ AU MODÈLE : ${model} ---\n--- CHUNK ${chunk.id} (${chunk.startTime}s - ${chunk.endTime}s) ---\n\n${chunk.text}`,
-        chunkSubfolder
-      );
+    const chunkSubfolder = `extraction/chunk_${chunk.id}`;
+    
+    // Sauvegarder le prompt pour ce chunk
+    debugLogService.log(
+      analysisId,
+      '1_prompt.txt',
+      `--- PROMPT ENVOYÉ AU MODÈLE : ${model} ---\n--- CHUNK ${chunk.id} (${chunk.startTime}s - ${chunk.endTime}s) ---\n\n${chunk.text}`,
+      chunkSubfolder
+    );
 
-      // Appel au LLM pour ce chunk
+    // Définir la fonction d'appel API pour le retry
+    const apiCall = async () => {
       const response = await openrouter.chat.completions.create({
         model: model,
         messages: [
@@ -97,7 +134,7 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
         return [];
       }
 
-      // Traiter les claims de ce chunk (sans raffinage, on fait confiance au LLM)
+      // Traiter les claims de ce chunk
       const chunkClaims = parsedData.claims.map(claimData => {
         const { claim: claimText, estimated_timestamp } = claimData;
         
@@ -114,24 +151,36 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
 
       console.log(`✅ Chunk ${chunk.id}: ${chunkClaims.length} claims extraits`);
       return chunkClaims;
+    };
 
+    try {
+      // Appel avec système de retry
+      return await callLLMWithRetry(
+        apiCall,
+        maxRetries,
+        retryDelay,
+        `Chunk ${chunk.id}`
+      );
     } catch (error) {
-      console.error(`❌ Erreur lors du traitement du chunk ${chunk.id}:`, error.message);
+      console.error(`💥 Échec définitif du chunk ${chunk.id} après ${maxRetries} tentatives:`, error.message);
       
       // Sauvegarder l'erreur pour debug
       debugLogService.log(
         analysisId,
         '2_response_FAILED.txt',
-        `ERREUR: ${error.message}`,
-        `extraction/chunk_${chunk.id}`
+        `ERREUR DÉFINITIVE après ${maxRetries} tentatives: ${error.message}`,
+        chunkSubfolder
       );
       
-      // Retourner un tableau vide en cas d'erreur
+      // Retourner un tableau vide en cas d'échec définitif
       return [];
     }
   });
 
-  // Traiter les tâches par lots
+  // 6. Traiter les tâches par lots avec sauvegarde progressive
+  const allClaims = [];
+  let processedChunks = 0;
+  
   for (let i = 0; i < tasks.length; i += limit) {
     const batch = tasks.slice(i, i + limit);
     const batchNumber = Math.floor(i / limit) + 1;
@@ -143,31 +192,70 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
       const batchResults = await Promise.all(batch.map(task => task()));
       
       // Agréger les résultats de ce lot
+      const batchClaims = [];
       for (const chunkClaims of batchResults) {
+        batchClaims.push(...chunkClaims);
         allClaims.push(...chunkClaims);
       }
       
-      console.log(`✅ Lot ${batchNumber} terminé`);
+      processedChunks += batch.length;
+      
+      // Calculer et mettre à jour le progrès
+      const progress = Math.round((processedChunks / chunks.length) * 100);
+      
+      console.log(`✅ Lot ${batchNumber} terminé - ${batchClaims.length} nouveaux claims`);
+      console.log(`📊 Progrès: ${processedChunks}/${chunks.length} chunks (${progress}%)`);
+      
+      // SAUVEGARDE PROGRESSIVE : Sauvegarder les claims de ce lot immédiatement
+      if (batchClaims.length > 0) {
+        // Dédoublonner seulement les nouveaux claims de ce lot
+        const uniqueBatchClaims = deduplicateNewClaims(batchClaims, allClaims.slice(0, allClaims.length - batchClaims.length));
+        
+        if (uniqueBatchClaims.length > 0) {
+          await prisma.claim.createMany({
+            data: uniqueBatchClaims.map(claim => ({
+              analysisId: analysisId,
+              text: claim.text,
+              timestamp: claim.timestamp,
+            })),
+            skipDuplicates: true
+          });
+          
+          console.log(`💾 ${uniqueBatchClaims.length} nouveaux claims sauvegardés en base`);
+        }
+      }
+      
+      // Mettre à jour le statut et le progrès de l'analyse
+      await prisma.analysis.update({
+        where: { id: analysisId },
+        data: {
+          status: processedChunks < chunks.length ? 'PARTIALLY_COMPLETE' : 'EXTRACTING_CLAIMS',
+          progress: progress
+        }
+      });
       
     } catch (error) {
       console.error(`❌ Erreur lors du traitement du lot ${batchNumber}:`, error.message);
       // Continuer avec les autres lots même en cas d'erreur
+      processedChunks += batch.length; // Compter les chunks même en cas d'erreur
     }
   }
 
-  console.log(`📋 Total avant dédoublonnage: ${allClaims.length} claims`);
+  console.log(`📋 Total final: ${allClaims.length} claims extraits`);
 
-  // 5. Dédoublonnage des claims (à cause du chevauchement)
+  // 7. Dédoublonnage final (pour s'assurer de la cohérence)
   const uniqueClaims = deduplicateClaims(allClaims, chunks, structuredTranscript.paragraphs);
   
-  console.log(`✨ Total après dédoublonnage: ${uniqueClaims.length} claims uniques`);
+  console.log(`✨ Total après dédoublonnage final: ${uniqueClaims.length} claims uniques`);
   
-  // 6. Sauvegarder un résumé de l'extraction
+  // 8. Sauvegarder un résumé de l'extraction
   const extractionSummary = {
     totalChunks: chunks.length,
     chunkSize: chunkSize,
     chunkOverlap: chunkOverlap,
     model: model,
+    maxRetries: maxRetries,
+    retryDelay: retryDelay,
     totalClaimsBeforeDedup: allClaims.length,
     totalClaimsAfterDedup: uniqueClaims.length,
     extractionTimestamp: new Date().toISOString(),
@@ -175,7 +263,7 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
       id: chunk.id,
       startTime: chunk.startTime,
       endTime: chunk.endTime,
-      claimsExtracted: allClaims.filter(claim => 
+      claimsExtracted: allClaims.filter(claim =>
         claim.timestamp >= chunk.startTime && claim.timestamp <= chunk.endTime
       ).length
     }))
@@ -188,7 +276,65 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
     'extraction'
   );
 
+  // Retourner tous les claims (ils sont déjà en base grâce à la sauvegarde progressive)
   return uniqueClaims;
+}
+
+/**
+ * Dédoublonne les nouveaux claims d'un lot par rapport aux claims déjà traités
+ * @param {Array} newClaims - Nouveaux claims à vérifier
+ * @param {Array} existingClaims - Claims déjà traités
+ * @returns {Array} Claims uniques du nouveau lot
+ */
+function deduplicateNewClaims(newClaims, existingClaims) {
+  if (!existingClaims || existingClaims.length === 0) {
+    return newClaims;
+  }
+  
+  const uniqueNewClaims = [];
+  const threshold = 0.8; // Seuil de similarité pour considérer deux claims comme identiques
+  
+  for (const newClaim of newClaims) {
+    let isDuplicate = false;
+    
+    for (const existingClaim of existingClaims) {
+      // Vérifier la similarité textuelle et temporelle
+      const textSimilarity = calculateTextSimilarity(newClaim.text, existingClaim.text);
+      const timeDifference = Math.abs(newClaim.timestamp - existingClaim.timestamp);
+      
+      if (textSimilarity > threshold && timeDifference < 30) { // 30 secondes de tolérance
+        isDuplicate = true;
+        break;
+      }
+    }
+    
+    if (!isDuplicate) {
+      uniqueNewClaims.push(newClaim);
+    }
+  }
+  
+  return uniqueNewClaims;
+}
+
+/**
+ * Calcule la similarité entre deux textes (simple approximation)
+ * @param {string} text1 - Premier texte
+ * @param {string} text2 - Deuxième texte
+ * @returns {number} Score de similarité entre 0 et 1
+ */
+function calculateTextSimilarity(text1, text2) {
+  if (!text1 || !text2) return 0;
+  
+  const words1 = text1.toLowerCase().split(/\s+/);
+  const words2 = text2.toLowerCase().split(/\s+/);
+  
+  const set1 = new Set(words1);
+  const set2 = new Set(words2);
+  
+  const intersection = new Set([...set1].filter(x => set2.has(x)));
+  const union = new Set([...set1, ...set2]);
+  
+  return intersection.size / union.size;
 }
 
 /**

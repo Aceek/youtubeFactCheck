@@ -21,6 +21,7 @@ export function useAnalysis() {
       setAnalysis(updatedAnalysis);
 
       // On arrête le polling et le chargement principal SEULEMENT si l'état est final.
+      // PARTIALLY_COMPLETE n'est pas un état final, on continue le polling
       if (updatedAnalysis.status === 'COMPLETE' || updatedAnalysis.status === 'FAILED') {
         setIsLoading(false);
         stopPolling();
@@ -64,8 +65,9 @@ export function useAnalysis() {
     try {
       setAnalysis(prevAnalysis => ({
         ...prevAnalysis,
-        // On passe directement à VALIDATING si c'est activé, sinon EXTRACTING
-        status: withValidation ? 'VALIDATING_CLAIMS' : 'EXTRACTING_CLAIMS',
+        // Réinitialiser le statut et le progrès
+        status: 'EXTRACTING_CLAIMS',
+        progress: 0,
         claims: [],
       }));
 

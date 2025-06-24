@@ -134,12 +134,32 @@ async function runClaimExtractionProcess(analysisId, transcription, provider, wi
       ? 'MOCK_PROVIDER'
       : process.env.OPENROUTER_MODEL || "mistralai/mistral-7b-instruct:free";
 
-    await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'EXTRACTING_CLAIMS' } });
+    // Initialiser le statut et le progrès
+    await prisma.analysis.update({
+      where: { id: analysisId },
+      data: {
+        status: 'EXTRACTING_CLAIMS',
+        progress: 0
+      }
+    });
     
     let claimsData;
     if (provider === 'MOCK_PROVIDER') {
       claimsData = await claimExtractionService.mockExtractClaimsFromText();
+      
+      // Pour le mode mock, sauvegarder les claims traditionnellement
+      if (claimsData.length > 0) {
+        await prisma.claim.createMany({
+          data: claimsData.map(claim => ({
+            analysisId: analysisId,
+            text: claim.text,
+            timestamp: claim.timestamp,
+          })),
+        });
+      }
     } else {
+      // Le service d'extraction gère maintenant sa propre sauvegarde progressive
+      // Il retourne les claims mais ils sont déjà en base de données
       claimsData = await claimExtractionService.extractClaimsWithTimestamps(
         analysisId,
         transcription.content,
@@ -148,17 +168,8 @@ async function runClaimExtractionProcess(analysisId, transcription, provider, wi
     }
     
     console.log(`${claimsData.length} affirmations extraites avec le modèle ${currentLlmModel}.`);
-    if (claimsData.length > 0) {
-      await prisma.claim.createMany({
-        data: claimsData.map(claim => ({
-          analysisId: analysisId,
-          text: claim.text,
-          timestamp: claim.timestamp,
-        })),
-      });
-    }
 
-    // Récupérer les claims créés pour la validation
+    // Récupérer les claims créés pour la validation (ils sont maintenant en base)
     const createdClaims = await prisma.claim.findMany({
       where: { analysisId },
       orderBy: { timestamp: 'asc' }
@@ -171,14 +182,26 @@ async function runClaimExtractionProcess(analysisId, transcription, provider, wi
     // Générer le rapport final via le service dédié
     await reportService.generateAndSaveFinalReport(analysisId);
     
+    // Finaliser l'analyse
     await prisma.analysis.update({
       where: { id: analysisId },
-      data: { status: 'COMPLETE', llmModel: currentLlmModel }
+      data: {
+        status: 'COMPLETE',
+        llmModel: currentLlmModel,
+        progress: 100
+      }
     });
     console.log(`Analyse ${analysisId} terminée avec succès.`);
   } catch (error) {
     console.error(`Échec du processus d'extraction ou de validation pour l'analyse ${analysisId}:`, error);
-    await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'FAILED', errorMessage: `Erreur critique : ${error.message}` } });
+    await prisma.analysis.update({
+      where: { id: analysisId },
+      data: {
+        status: 'FAILED',
+        errorMessage: `Erreur critique : ${error.message}`,
+        progress: 0
+      }
+    });
   }
 }
 
@@ -192,7 +215,13 @@ async function runClaimExtractionProcess(analysisId, transcription, provider, wi
 async function runClaimValidationProcess(analysisId, claims, paragraphs, provider) {
   console.log(`🔍 Début de la validation par chunks pour ${claims.length} claims`);
   
-  await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'VALIDATING_CLAIMS' } });
+  await prisma.analysis.update({
+    where: { id: analysisId },
+    data: {
+      status: 'VALIDATING_CLAIMS',
+      progress: 0
+    }
+  });
 
   if (provider === 'MOCK_PROVIDER') {
     // Mode mock : utiliser l'ancienne logique
@@ -240,6 +269,7 @@ async function runClaimValidationProcess(analysisId, claims, paragraphs, provide
 
   const allValidationResults = [];
   const limit = parseInt(process.env.CONCURRENT_CHUNK_LIMIT) || 3;
+  let processedChunks = 0;
   
   console.log(`🚀 Validation par lots avec une limite de ${limit} chunks simultanés`);
 
@@ -320,7 +350,7 @@ async function runClaimValidationProcess(analysisId, claims, paragraphs, provide
 
   console.log(`📦 ${tasks.length} chunks avec des claims à valider`);
 
-  // Traiter les tâches par lots
+  // Traiter les tâches par lots avec suivi du progrès
   for (let i = 0; i < tasks.length; i += limit) {
     const batch = tasks.slice(i, i + limit);
     const batchNumber = Math.floor(i / limit) + 1;
@@ -336,7 +366,20 @@ async function runClaimValidationProcess(analysisId, claims, paragraphs, provide
         allValidationResults.push(...chunkResults);
       }
       
-      console.log(`✅ Lot de validation ${batchNumber} terminé`);
+      processedChunks += batch.length;
+      
+      // Calculer et mettre à jour le progrès de validation
+      const validationProgress = Math.round((processedChunks / tasks.length) * 100);
+      
+      await prisma.analysis.update({
+        where: { id: analysisId },
+        data: {
+          status: processedChunks < tasks.length ? 'PARTIALLY_COMPLETE' : 'VALIDATING_CLAIMS',
+          progress: validationProgress
+        }
+      });
+      
+      console.log(`✅ Lot de validation ${batchNumber} terminé - Progrès: ${processedChunks}/${tasks.length} chunks (${validationProgress}%)`);
       
       // Petite pause entre les lots pour ménager l'API
       if (i + limit < tasks.length) {
@@ -346,6 +389,7 @@ async function runClaimValidationProcess(analysisId, claims, paragraphs, provide
     } catch (error) {
       console.error(`❌ Erreur lors du traitement du lot de validation ${batchNumber}:`, error.message);
       // Continuer avec les autres lots même en cas d'erreur
+      processedChunks += batch.length;
     }
   }
 

@@ -1,0 +1,8 @@
+-- AlterEnum
+ALTER TYPE "ClaimValidationStatus" ADD VALUE 'NOT_VERIFIABLE_CLAIM';
+
+-- AlterEnum
+ALTER TYPE "Status" ADD VALUE 'PARTIALLY_COMPLETE';
+
+-- AlterTable
+ALTER TABLE "Analysis" ADD COLUMN     "progress" INTEGER NOT NULL DEFAULT 0;
