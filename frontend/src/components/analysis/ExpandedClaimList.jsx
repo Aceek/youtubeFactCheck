@@ -146,34 +146,36 @@ function ExpandedClaimList({ claims, onClaimClick, currentTime }) {
   }, {});
 
   return (
-    <div className="space-y-6">
-      {/* Statistiques */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        {Object.entries(stats).map(([status, count]) => {
-          const icons = {
-            VALID: { icon: '✅', color: 'text-green-400', bg: 'bg-green-500/20' },
-            INACCURATE: { icon: '⚠️', color: 'text-yellow-400', bg: 'bg-yellow-500/20' },
-            OUT_OF_CONTEXT: { icon: '🔎', color: 'text-orange-400', bg: 'bg-orange-500/20' },
-            HALLUCINATION: { icon: '👻', color: 'text-red-400', bg: 'bg-red-500/20' },
-            NOT_VERIFIABLE_CLAIM: { icon: '💬', color: 'text-gray-400', bg: 'bg-gray-500/20' },
-            UNVERIFIED: { icon: '…', color: 'text-gray-500', bg: 'bg-gray-600/20' },
-          };
-          const stat = icons[status] || icons.UNVERIFIED;
-          
-          return (
-            <div key={status} className={`${stat.bg} p-3 rounded-lg border border-gray-600/30 text-center`}>
-              <div className="text-2xl mb-1">{stat.icon}</div>
-              <div className={`text-lg font-bold ${stat.color}`}>{count}</div>
-              <div className="text-xs text-gray-400 capitalize">{status.toLowerCase().replace('_', ' ')}</div>
-            </div>
-          );
-        })}
+    <div className="h-full flex flex-col overflow-hidden">
+      {/* Statistiques - Section fixe */}
+      <div className="flex-shrink-0 p-6 border-b border-gray-700/50">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          {Object.entries(stats).map(([status, count]) => {
+            const icons = {
+              VALID: { icon: '✅', color: 'text-green-400', bg: 'bg-green-500/20' },
+              INACCURATE: { icon: '⚠️', color: 'text-yellow-400', bg: 'bg-yellow-500/20' },
+              OUT_OF_CONTEXT: { icon: '🔎', color: 'text-orange-400', bg: 'bg-orange-500/20' },
+              HALLUCINATION: { icon: '👻', color: 'text-red-400', bg: 'bg-red-500/20' },
+              NOT_VERIFIABLE_CLAIM: { icon: '💬', color: 'text-gray-400', bg: 'bg-gray-500/20' },
+              UNVERIFIED: { icon: '…', color: 'text-gray-500', bg: 'bg-gray-600/20' },
+            };
+            const stat = icons[status] || icons.UNVERIFIED;
+            
+            return (
+              <div key={status} className={`${stat.bg} p-3 rounded-lg border border-gray-600/30 text-center`}>
+                <div className="text-2xl mb-1">{stat.icon}</div>
+                <div className={`text-lg font-bold ${stat.color}`}>{count}</div>
+                <div className="text-xs text-gray-400 capitalize">{status.toLowerCase().replace('_', ' ')}</div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Liste des affirmations */}
+      {/* Liste des affirmations - Section scrollable */}
       <div
         ref={listContainerRef}
-        className="space-y-6 max-h-[60vh] overflow-y-auto scrollbar-modal p-2"
+        className="flex-1 overflow-y-auto scrollbar-modal p-6 space-y-6"
       >
         {claims.map((claim, index) => {
           const isActive = claim.id === activeClaimId;

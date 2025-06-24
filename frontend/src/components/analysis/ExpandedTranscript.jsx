@@ -95,9 +95,9 @@ function ExpandedTranscript({ transcription, onTimestampClick }) {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Barre de recherche */}
-      <div className="sticky top-0 z-10 bg-gray-900/95 backdrop-blur-sm p-4 rounded-lg border border-cyan-400/30">
+    <div className="h-full flex flex-col overflow-hidden">
+      {/* Barre de recherche - Section fixe */}
+      <div className="flex-shrink-0 p-6 border-b border-gray-700/50 bg-gray-900/50">
         <div className="flex items-center gap-4">
           <div className="flex-1 relative">
             <input
@@ -150,26 +150,28 @@ function ExpandedTranscript({ transcription, onTimestampClick }) {
         )}
       </div>
 
-      {/* Statistiques */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-black/30 p-4 rounded-lg border border-cyan-400/20">
-          <div className="text-2xl font-bold text-cyan-400">{transcription.fullText.split(' ').length}</div>
-          <div className="text-sm text-gray-400">Mots au total</div>
-        </div>
-        <div className="bg-black/30 p-4 rounded-lg border border-fuchsia-400/20">
-          <div className="text-2xl font-bold text-fuchsia-400">{segments.length}</div>
-          <div className="text-sm text-gray-400">Segments</div>
-        </div>
-        <div className="bg-black/30 p-4 rounded-lg border border-green-400/20">
-          <div className="text-2xl font-bold text-green-400">
-            {Math.ceil(transcription.fullText.length / 1000)}min
+      {/* Statistiques - Section fixe */}
+      <div className="flex-shrink-0 p-6 border-b border-gray-700/50">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-black/30 p-4 rounded-lg border border-cyan-400/20">
+            <div className="text-2xl font-bold text-cyan-400">{transcription.fullText.split(' ').length}</div>
+            <div className="text-sm text-gray-400">Mots au total</div>
           </div>
-          <div className="text-sm text-gray-400">Temps de lecture estimé</div>
+          <div className="bg-black/30 p-4 rounded-lg border border-fuchsia-400/20">
+            <div className="text-2xl font-bold text-fuchsia-400">{segments.length}</div>
+            <div className="text-sm text-gray-400">Segments</div>
+          </div>
+          <div className="bg-black/30 p-4 rounded-lg border border-green-400/20">
+            <div className="text-2xl font-bold text-green-400">
+              {Math.ceil(transcription.fullText.length / 1000)}min
+            </div>
+            <div className="text-sm text-gray-400">Temps de lecture estimé</div>
+          </div>
         </div>
       </div>
 
-      {/* Transcription segmentée */}
-      <div className="space-y-4 max-h-[60vh] overflow-y-auto scrollbar-modal p-2">
+      {/* Transcription segmentée - Section scrollable */}
+      <div className="flex-1 overflow-y-auto scrollbar-modal p-6 space-y-4">
         {(searchTerm ? filteredSegments : segments).map((segment, index) => {
           const isHighlighted = searchTerm && index === highlightedIndex;
           
@@ -207,18 +209,17 @@ function ExpandedTranscript({ transcription, onTimestampClick }) {
             </div>
           );
         })}
-      </div>
-
-      {/* Mode texte complet */}
-      <div className="border-t border-gray-700 pt-6">
-        <h3 className="text-lg font-semibold text-cyan-300 mb-4 flex items-center gap-2">
-          <span>📄</span>
-          Transcription complète
-        </h3>
-        <div className="bg-gray-900/60 p-6 rounded-lg border border-gray-700 max-h-96 overflow-y-auto scrollbar-modal">
-          <p className="text-gray-300 leading-relaxed whitespace-pre-wrap">
-            {highlightText(transcription.fullText, searchTerm)}
-          </p>
+        {/* Mode texte complet - Intégré dans la zone scrollable */}
+        <div className="border-t border-gray-700/50 pt-6 mt-8">
+          <h3 className="text-lg font-semibold text-cyan-300 mb-4 flex items-center gap-2">
+            <span>📄</span>
+            Transcription complète
+          </h3>
+          <div className="bg-gray-900/60 p-6 rounded-lg border border-gray-700">
+            <p className="text-gray-300 leading-relaxed whitespace-pre-wrap">
+              {highlightText(transcription.fullText, searchTerm)}
+            </p>
+          </div>
         </div>
       </div>
     </div>
