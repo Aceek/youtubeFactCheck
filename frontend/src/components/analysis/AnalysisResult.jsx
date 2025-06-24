@@ -1,9 +1,16 @@
+import { useState } from 'react';
 import ClaimList from './ClaimList.jsx';
 import YouTubePlayer from './YouTubePlayer.jsx';
 import LoadingSpinner from '../common/LoadingSpinner.jsx';
-import VideoInfo from './VideoInfo.jsx'; // On déplace l'import ici
+import VideoInfo from './VideoInfo.jsx';
+import ExpandModal from '../common/ExpandModal.jsx';
+import ExpandedClaimList from './ExpandedClaimList.jsx';
+import ExpandedTranscript from './ExpandedTranscript.jsx';
 
 function AnalysisResult({ analysis, currentTime, playerKey, onPlayerReady, onClaimClick, onRerunClaims, onReloadPlayer }) {
+  const [showClaimsModal, setShowClaimsModal] = useState(false);
+  const [showTranscriptModal, setShowTranscriptModal] = useState(false);
+
   if (!analysis) return null;
 
   // Conditions d'affichage granulaires
@@ -13,6 +20,17 @@ function AnalysisResult({ analysis, currentTime, playerKey, onPlayerReady, onCla
   
   // L'analyse est "en cours de traitement" si son statut n'est pas final
   const isProcessing = analysis.status !== 'COMPLETE' && analysis.status !== 'FAILED';
+
+  // Gestionnaire pour les clics sur les timestamps dans les modaux
+  const handleModalClaimClick = (timestamp) => {
+    onClaimClick(timestamp);
+    setShowClaimsModal(false); // Fermer le modal après navigation
+  };
+
+  const handleModalTranscriptClick = (timestamp) => {
+    onClaimClick(timestamp);
+    setShowTranscriptModal(false); // Fermer le modal après navigation
+  };
 
   return (
     <div className="space-y-12">
@@ -39,9 +57,27 @@ function AnalysisResult({ analysis, currentTime, playerKey, onPlayerReady, onCla
 
           <div className="bg-black/30 p-6 rounded-xl shadow-2xl border border-fuchsia-500/20 backdrop-blur-lg flex flex-col">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-              <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-400 to-cyan-300">
-                Affirmations Extraites
-              </h2>
+              <div className="flex items-center gap-3">
+                <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-400 to-cyan-300">
+                  Affirmations Extraites
+                </h2>
+                {claimsAvailable && (
+                  <button
+                    onClick={() => setShowClaimsModal(true)}
+                    className="group p-2 bg-fuchsia-500/20 hover:bg-fuchsia-500/40 border border-fuchsia-500/30 hover:border-fuchsia-400 rounded-lg transition-all duration-200"
+                    title="Agrandir la liste des affirmations"
+                  >
+                    <svg
+                      className="w-5 h-5 text-fuchsia-400 group-hover:text-fuchsia-300 transition-colors"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                    </svg>
+                  </button>
+                )}
+              </div>
               <button
                 onClick={onRerunClaims}
                 disabled={isProcessing} // <-- Le bouton est désactivé PENDANT TOUT LE PROCESSUS
@@ -84,12 +120,56 @@ function AnalysisResult({ analysis, currentTime, playerKey, onPlayerReady, onCla
       {/* La transcription s'affiche en dernier */}
       {transcriptionAvailable && (
         <div className="bg-black/30 p-6 rounded-xl shadow-2xl border border-cyan-400/20 backdrop-blur-lg">
-          <h2 className="text-xl font-bold text-cyan-300 mb-4">Transcription Complète</h2>
-          <div className="max-h-60 overflow-y-auto p-4 bg-gray-900/60 rounded-lg border border-gray-700 text-gray-300 whitespace-pre-wrap leading-relaxed scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <h2 className="text-xl font-bold text-cyan-300">Transcription Complète</h2>
+              <button
+                onClick={() => setShowTranscriptModal(true)}
+                className="group p-2 bg-cyan-500/20 hover:bg-cyan-500/40 border border-cyan-500/30 hover:border-cyan-400 rounded-lg transition-all duration-200"
+                title="Agrandir la transcription"
+              >
+                <svg
+                  className="w-5 h-5 text-cyan-400 group-hover:text-cyan-300 transition-colors"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div className="max-h-60 overflow-y-auto p-4 bg-gray-900/60 rounded-lg border border-gray-700 text-gray-300 whitespace-pre-wrap leading-relaxed scrollbar-custom">
             {analysis.transcription.fullText}
           </div>
         </div>
       )}
+
+      {/* Modaux */}
+      <ExpandModal
+        isOpen={showClaimsModal}
+        onClose={() => setShowClaimsModal(false)}
+        title="Affirmations Extraites - Vue Détaillée"
+        type="claims"
+      >
+        <ExpandedClaimList
+          claims={analysis.claims}
+          onClaimClick={handleModalClaimClick}
+          currentTime={currentTime}
+        />
+      </ExpandModal>
+
+      <ExpandModal
+        isOpen={showTranscriptModal}
+        onClose={() => setShowTranscriptModal(false)}
+        title="Transcription Complète - Vue Détaillée"
+        type="transcript"
+      >
+        <ExpandedTranscript
+          transcription={analysis.transcription}
+          onTimestampClick={handleModalTranscriptClick}
+        />
+      </ExpandModal>
     </div>
   );
 }

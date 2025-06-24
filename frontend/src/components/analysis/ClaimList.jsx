@@ -92,7 +92,7 @@ function ClaimList({ claims, onClaimClick, currentTime }) {
       {/* On applique la référence au conteneur <ul> ici */}
       <ul
         ref={listContainerRef}
-        className="space-y-4 max-h-[calc(390px-3rem)] overflow-y-auto p-1 pr-2 scrollbar-thin scrollbar-thumb-fuchsia-500/50 scrollbar-track-black/30"
+        className="space-y-4 max-h-[calc(390px-3rem)] overflow-y-auto p-1 pr-2 scrollbar-custom"
       >
         {claims.map((claim) => {
           const isActive = claim.id === activeClaimId;
