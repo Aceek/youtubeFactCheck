@@ -206,23 +206,18 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
       console.log(`✅ Lot ${batchNumber} terminé - ${batchClaims.length} nouveaux claims`);
       console.log(`📊 Progrès: ${processedChunks}/${chunks.length} chunks (${progress}%)`);
       
-      // SAUVEGARDE PROGRESSIVE : Sauvegarder les claims de ce lot immédiatement
+      // SAUVEGARDE PROGRESSIVE SIMPLIFIÉE : On sauvegarde tout, y compris les doublons potentiels
       if (batchClaims.length > 0) {
-        // Dédoublonner seulement les nouveaux claims de ce lot
-        const uniqueBatchClaims = deduplicateNewClaims(batchClaims, allClaims.slice(0, allClaims.length - batchClaims.length));
+        await prisma.claim.createMany({
+          data: batchClaims.map(claim => ({
+            analysisId: analysisId,
+            text: claim.text,
+            timestamp: claim.timestamp,
+          })),
+          skipDuplicates: false, // On s'assure de ne pas sauter les doublons
+        });
         
-        if (uniqueBatchClaims.length > 0) {
-          await prisma.claim.createMany({
-            data: uniqueBatchClaims.map(claim => ({
-              analysisId: analysisId,
-              text: claim.text,
-              timestamp: claim.timestamp,
-            })),
-            skipDuplicates: true
-          });
-          
-          console.log(`💾 ${uniqueBatchClaims.length} nouveaux claims sauvegardés en base`);
-        }
+        console.log(`💾 ${batchClaims.length} claims bruts sauvegardés en base`);
       }
       
       // Mettre à jour le statut et le progrès de l'analyse
@@ -241,9 +236,9 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
     }
   }
 
-  console.log(`📋 Total final: ${allClaims.length} claims extraits`);
+  console.log(`📋 Total brut avant dédoublonnage final: ${allClaims.length} claims`);
 
-  // 7. Dédoublonnage final (pour s'assurer de la cohérence)
+  // DÉDOUBLONNAGE FINAL ET UNIQUE
   const uniqueClaims = deduplicateClaims(allClaims, chunks, structuredTranscript.paragraphs);
   
   console.log(`✨ Total après dédoublonnage final: ${uniqueClaims.length} claims uniques`);
@@ -278,63 +273,6 @@ async function extractClaimsWithTimestamps(analysisId, structuredTranscript, mod
 
   // Retourner tous les claims (ils sont déjà en base grâce à la sauvegarde progressive)
   return uniqueClaims;
-}
-
-/**
- * Dédoublonne les nouveaux claims d'un lot par rapport aux claims déjà traités
- * @param {Array} newClaims - Nouveaux claims à vérifier
- * @param {Array} existingClaims - Claims déjà traités
- * @returns {Array} Claims uniques du nouveau lot
- */
-function deduplicateNewClaims(newClaims, existingClaims) {
-  if (!existingClaims || existingClaims.length === 0) {
-    return newClaims;
-  }
-  
-  const uniqueNewClaims = [];
-  const threshold = 0.8; // Seuil de similarité pour considérer deux claims comme identiques
-  
-  for (const newClaim of newClaims) {
-    let isDuplicate = false;
-    
-    for (const existingClaim of existingClaims) {
-      // Vérifier la similarité textuelle et temporelle
-      const textSimilarity = calculateTextSimilarity(newClaim.text, existingClaim.text);
-      const timeDifference = Math.abs(newClaim.timestamp - existingClaim.timestamp);
-      
-      if (textSimilarity > threshold && timeDifference < 30) { // 30 secondes de tolérance
-        isDuplicate = true;
-        break;
-      }
-    }
-    
-    if (!isDuplicate) {
-      uniqueNewClaims.push(newClaim);
-    }
-  }
-  
-  return uniqueNewClaims;
-}
-
-/**
- * Calcule la similarité entre deux textes (simple approximation)
- * @param {string} text1 - Premier texte
- * @param {string} text2 - Deuxième texte
- * @returns {number} Score de similarité entre 0 et 1
- */
-function calculateTextSimilarity(text1, text2) {
-  if (!text1 || !text2) return 0;
-  
-  const words1 = text1.toLowerCase().split(/\s+/);
-  const words2 = text2.toLowerCase().split(/\s+/);
-  
-  const set1 = new Set(words1);
-  const set2 = new Set(words2);
-  
-  const intersection = new Set([...set1].filter(x => set2.has(x)));
-  const union = new Set([...set1, ...set2]);
-  
-  return intersection.size / union.size;
 }
 
 /**
