@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
 // Composant unifié pour afficher le statut avec priorité fact-checking > validation
 const UnifiedStatusIndicator = ({ claim }) => {
   const [showTooltip, setShowTooltip] = useState(false);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
+  const hideTimeoutRef = useRef(null);
 
   // Logique de priorité : fact-checking en premier, validation en fallback
   const getUnifiedStatus = () => {
@@ -114,34 +115,58 @@ const UnifiedStatusIndicator = ({ claim }) => {
   const unifiedStatus = getUnifiedStatus();
   const { config, type, explanation, sources } = unifiedStatus;
 
-  // Gestion de la position du tooltip
-  const handleMouseEnter = (e) => {
+  // Gestion de la position du tooltip avec délai
+  const handleMouseEnter = useCallback((e) => {
+    // Annuler tout timeout de fermeture en cours
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current);
+      hideTimeoutRef.current = null;
+    }
+
     const rect = e.currentTarget.getBoundingClientRect();
     setTooltipPosition({
       x: rect.left + rect.width / 2,
       y: rect.top
     });
     setShowTooltip(true);
-  };
+  }, []);
 
-  const handleMouseLeave = () => {
+  const handleMouseLeave = useCallback(() => {
+    // Délai avant fermeture pour permettre de naviguer vers la tooltip
+    hideTimeoutRef.current = setTimeout(() => {
+      setShowTooltip(false);
+    }, 200);
+  }, []);
+
+  const handleTooltipMouseEnter = useCallback(() => {
+    // Annuler la fermeture si on entre dans la tooltip
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current);
+      hideTimeoutRef.current = null;
+    }
+  }, []);
+
+  const handleTooltipMouseLeave = useCallback(() => {
+    // Fermer immédiatement quand on quitte la tooltip
     setShowTooltip(false);
-  };
+  }, []);
 
   // Composant Tooltip flottant avec portail
   const TooltipPortal = () => {
     if (!showTooltip) return null;
 
     return createPortal(
-      <div 
-        className="fixed z-[9999] pointer-events-none"
+      <div
+        className="fixed z-[9999] pointer-events-auto"
         style={{
           left: tooltipPosition.x,
           top: tooltipPosition.y - 10,
           transform: 'translate(-50%, -100%)'
         }}
+        onMouseEnter={handleTooltipMouseEnter}
+        onMouseLeave={handleTooltipMouseLeave}
       >
-        <div className={`${config.bgColor} border ${config.color.replace('text-', 'border-')} rounded-lg p-4 shadow-xl backdrop-blur-sm max-w-sm w-80`}>
+        <div className={`${config.bgColor} border ${config.color.replace('text-', 'border-')} rounded-lg p-4 shadow-xl backdrop-blur-sm max-w-sm w-80 select-text`}>
           {/* En-tête du statut */}
           <div className="flex items-center gap-2 mb-3">
             <span className="text-lg">{config.icon}</span>
@@ -177,7 +202,7 @@ const UnifiedStatusIndicator = ({ claim }) => {
                       href={source.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-cyan-300 hover:text-cyan-200 underline break-all pointer-events-auto"
+                      className="text-cyan-300 hover:text-cyan-200 underline break-all"
                       onClick={(e) => e.stopPropagation()}
                     >
                       {source.title || source.url}
