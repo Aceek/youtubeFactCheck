@@ -1,82 +1,6 @@
 import React, { useMemo, useRef, useEffect } from 'react';
 import FactCheckIcon from './FactCheckIcon';
-
-// Icônes de statut avec plus de détails pour le mode étendu
-const ValidationIcon = ({ status, explanation, compact = false }) => {
-  const icons = {
-    VALID: { 
-      icon: '✅', 
-      color: 'border-green-500', 
-      bgColor: 'bg-green-500/10',
-      title: 'Valide & Vérifiable',
-      description: 'Cette affirmation a été vérifiée et est exacte'
-    },
-    INACCURATE: { 
-      icon: '⚠️', 
-      color: 'border-yellow-500', 
-      bgColor: 'bg-yellow-500/10',
-      title: 'Imprécis',
-      description: 'Cette affirmation contient des inexactitudes'
-    },
-    OUT_OF_CONTEXT: { 
-      icon: '🔎', 
-      color: 'border-orange-500', 
-      bgColor: 'bg-orange-500/10',
-      title: 'Hors contexte',
-      description: 'Cette affirmation manque de contexte important'
-    },
-    HALLUCINATION: { 
-      icon: '👻', 
-      color: 'border-red-500', 
-      bgColor: 'bg-red-500/10',
-      title: 'Hallucination',
-      description: 'Cette affirmation semble être inventée'
-    },
-    NOT_VERIFIABLE_CLAIM: { 
-      icon: '💬', 
-      color: 'border-gray-400', 
-      bgColor: 'bg-gray-400/10',
-      title: 'Non Vérifiable',
-      description: 'Cette affirmation ne peut pas être vérifiée objectivement'
-    },
-    UNVERIFIED: { 
-      icon: '…', 
-      color: 'border-gray-500', 
-      bgColor: 'bg-gray-500/10',
-      title: 'Non vérifié',
-      description: 'Cette affirmation n\'a pas encore été vérifiée'
-    },
-  };
-  const current = icons[status] || icons.UNVERIFIED;
-  
-  // Mode compact pour la section secondaire
-  if (compact) {
-    return (
-      <div className="flex items-center gap-1" title={`${current.title}: ${explanation || current.description}`}>
-        <span className="text-sm">{current.icon}</span>
-        <span className="text-xs text-gray-400">{current.title}</span>
-      </div>
-    );
-  }
-  
-  // Mode étendu pour la section principale (conservé pour compatibilité)
-  return (
-    <div className={`flex items-center gap-3 p-3 rounded-lg ${current.bgColor} border ${current.color}`}>
-      <span className="text-2xl" title={current.title}>
-        {current.icon}
-      </span>
-      <div className="flex-1">
-        <div className="font-semibold text-white">{current.title}</div>
-        <div className="text-sm text-gray-300">{current.description}</div>
-        {explanation && (
-          <div className="text-xs text-gray-400 mt-1 italic">
-            "{explanation}"
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
+import ValidationIcon from './ValidationIcon';
 
 function ExpandedClaimList({ claims, onClaimClick, currentTime }) {
   const listContainerRef = useRef(null);
@@ -280,11 +204,7 @@ function ExpandedClaimList({ claims, onClaimClick, currentTime }) {
               <div className="flex items-center gap-2 text-xs text-gray-500">
                 <span className="text-gray-600">🔧</span>
                 <span>Validation IA:</span>
-                <ValidationIcon
-                  status={claim.validationStatus}
-                  explanation={claim.validationExplanation}
-                  compact={true}
-                />
+                <ValidationIcon claim={claim} />
               </div>
             </div>
           );
