@@ -1,23 +1,5 @@
 import React, { useMemo, useRef, useEffect } from 'react';
-import FactCheckIcon from './FactCheckIcon';
-
-// Icônes de statut
-const ValidationIcon = ({ status, explanation }) => {
-  const icons = {
-    VALID: { icon: '✅', color: 'border-green-500', title: 'Valide & Vérifiable' },
-    INACCURATE: { icon: '⚠️', color: 'border-yellow-500', title: 'Imprécis' },
-    OUT_OF_CONTEXT: { icon: '🔎', color: 'border-orange-500', title: 'Hors contexte' },
-    HALLUCINATION: { icon: '👻', color: 'border-red-500', title: 'Hallucination' },
-    NOT_VERIFIABLE_CLAIM: { icon: '💬', color: 'border-gray-400', title: 'Non Vérifiable' },
-    UNVERIFIED: { icon: '…', color: 'border-gray-500', title: 'Non vérifié' },
-  };
-  const current = icons[status] || icons.UNVERIFIED;
-  return (
-    <span className="text-xl" title={`${current.title}: ${explanation || ''}`}>
-      {current.icon}
-    </span>
-  );
-};
+import UnifiedStatusIndicator from './UnifiedStatusIndicator';
 
 function ClaimList({ claims, onClaimClick, currentTime }) {
   // --- NOUVEAU : Référence pour le conteneur scrollable (la liste <ul>) ---
@@ -119,8 +101,7 @@ function ClaimList({ claims, onClaimClick, currentTime }) {
                   "{claim.text}"
                 </p>
                 <div className="flex items-center gap-2">
-                  <ValidationIcon status={claim.validationStatus} explanation={claim.validationExplanation} />
-                  <FactCheckIcon claim={claim} />
+                  <UnifiedStatusIndicator claim={claim} />
                 </div>
               </div>
               <div className="text-right mt-3">

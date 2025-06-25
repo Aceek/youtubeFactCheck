@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useEffect } from 'react';
 import FactCheckIcon from './FactCheckIcon';
 
 // Icônes de statut avec plus de détails pour le mode étendu
-const ValidationIcon = ({ status, explanation }) => {
+const ValidationIcon = ({ status, explanation, compact = false }) => {
   const icons = {
     VALID: { 
       icon: '✅', 
@@ -49,6 +49,17 @@ const ValidationIcon = ({ status, explanation }) => {
   };
   const current = icons[status] || icons.UNVERIFIED;
   
+  // Mode compact pour la section secondaire
+  if (compact) {
+    return (
+      <div className="flex items-center gap-1" title={`${current.title}: ${explanation || current.description}`}>
+        <span className="text-sm">{current.icon}</span>
+        <span className="text-xs text-gray-400">{current.title}</span>
+      </div>
+    );
+  }
+  
+  // Mode étendu pour la section principale (conservé pour compatibilité)
   return (
     <div className={`flex items-center gap-3 p-3 rounded-lg ${current.bgColor} border ${current.color}`}>
       <span className="text-2xl" title={current.title}>
@@ -240,13 +251,40 @@ function ExpandedClaimList({ claims, onClaimClick, currentTime }) {
                 </p>
               </div>
 
-              {/* Statuts de validation et fact-checking */}
-              <div className="flex items-start gap-4">
+              {/* SECTION PRINCIPALE : Fact-checking détaillé */}
+              {claim.verdict ? (
+                <div className="mb-4">
+                  <div className="bg-gradient-to-r from-cyan-900/30 to-blue-900/30 border border-cyan-500/30 rounded-xl p-5">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="text-2xl">🎯</div>
+                      <h3 className="text-lg font-bold text-cyan-300">Résultat du Fact-Checking</h3>
+                    </div>
+                    <FactCheckIcon claim={claim} extended={true} />
+                  </div>
+                </div>
+              ) : (
+                <div className="mb-4">
+                  <div className="bg-gradient-to-r from-gray-900/30 to-gray-800/30 border border-gray-600/30 rounded-xl p-5">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="text-xl">⏳</div>
+                      <h3 className="text-lg font-bold text-gray-300">Fact-checking en cours...</h3>
+                    </div>
+                    <p className="text-sm text-gray-400">
+                      Cette affirmation est en cours de vérification par nos sources externes.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* SECTION SECONDAIRE : Validation technique discrète */}
+              <div className="flex items-center gap-2 text-xs text-gray-500">
+                <span className="text-gray-600">🔧</span>
+                <span>Validation IA:</span>
                 <ValidationIcon
                   status={claim.validationStatus}
                   explanation={claim.validationExplanation}
+                  compact={true}
                 />
-                <FactCheckIcon claim={claim} />
               </div>
             </div>
           );
