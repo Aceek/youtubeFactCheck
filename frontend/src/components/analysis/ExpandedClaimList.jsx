@@ -1,6 +1,17 @@
+// frontend/src/components/analysis/ExpandedClaimList.jsx
+
 import React, { useMemo, useRef, useEffect } from 'react';
 import FactCheckIcon from './FactCheckIcon';
 import ValidationIcon from './ValidationIcon';
+
+// --- NOUVEAU : Composant interne pour des statistiques compactes ---
+const StatItem = ({ icon, label, count, colorClass }) => (
+  <div className="flex items-center gap-2 text-sm">
+    <span className="text-lg">{icon}</span>
+    <span className={`font-bold ${colorClass}`}>{count}</span>
+    <span className="text-gray-300">{label}</span>
+  </div>
+);
 
 function ExpandedClaimList({ claims, onClaimClick, currentTime }) {
   const listContainerRef = useRef(null);
@@ -9,6 +20,7 @@ function ExpandedClaimList({ claims, onClaimClick, currentTime }) {
 
   const activeClaimId = useMemo(() => {
     let activeId = null;
+    if (!claims) return null;
     for (const claim of claims) {
       if (claim.timestamp <= currentTime) {
         activeId = claim.id;
@@ -38,6 +50,38 @@ function ExpandedClaimList({ claims, onClaimClick, currentTime }) {
       });
     }
   }, [activeClaimId]);
+
+  // --- NOUVEAU : Calcul des deux types de statistiques ---
+  const { validationStats, factCheckStats } = useMemo(() => {
+    const vStats = {};
+    const fcStats = {};
+    if (!claims) return { validationStats: {}, factCheckStats: {} };
+
+    for (const claim of claims) {
+      vStats[claim.validationStatus] = (vStats[claim.validationStatus] || 0) + 1;
+      if (claim.verdict) {
+        fcStats[claim.verdict] = (fcStats[claim.verdict] || 0) + 1;
+      }
+    }
+    return { validationStats: vStats, factCheckStats: fcStats };
+  }, [claims]);
+
+  // --- NOUVEAU : Configurations pour l'affichage des statistiques ---
+  const validationStatConfig = {
+    VALID: { icon: '✅', label: 'Valides', colorClass: 'text-green-400' },
+    INACCURATE: { icon: '⚠️', label: 'Imprécis', colorClass: 'text-yellow-400' },
+    OUT_OF_CONTEXT: { icon: '🔎', label: 'Hors Contexte', colorClass: 'text-orange-400' },
+    HALLUCINATION: { icon: '👻', label: 'Hallucinations', colorClass: 'text-red-400' },
+    NOT_VERIFIABLE_CLAIM: { icon: '💬', label: 'Non Vérifiables', colorClass: 'text-gray-400' },
+    UNVERIFIED: { icon: '…', label: 'Non Vérifiés', colorClass: 'text-gray-500' },
+  };
+
+  const factCheckStatConfig = {
+    TRUE: { icon: '✅', label: 'Vrais', colorClass: 'text-green-400' },
+    FALSE: { icon: '❌', label: 'Faux', colorClass: 'text-red-400' },
+    MISLEADING: { icon: '⚠️', label: 'Trompeurs', colorClass: 'text-orange-400' },
+    UNVERIFIABLE: { icon: '❓', label: 'Invérifiables', colorClass: 'text-gray-400' },
+  };
 
   const getBorderColor = (status) => {
     switch (status) {
@@ -75,37 +119,37 @@ function ExpandedClaimList({ claims, onClaimClick, currentTime }) {
     );
   }
 
-  // Statistiques des affirmations
-  const stats = claims.reduce((acc, claim) => {
-    acc[claim.validationStatus] = (acc[claim.validationStatus] || 0) + 1;
-    return acc;
-  }, {});
-
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      {/* Statistiques - Section fixe */}
-      <div className="flex-shrink-0 p-6 border-b border-gray-700/50">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-          {Object.entries(stats).map(([status, count]) => {
-            const icons = {
-              VALID: { icon: '✅', color: 'text-green-400', bg: 'bg-green-500/20' },
-              INACCURATE: { icon: '⚠️', color: 'text-yellow-400', bg: 'bg-yellow-500/20' },
-              OUT_OF_CONTEXT: { icon: '🔎', color: 'text-orange-400', bg: 'bg-orange-500/20' },
-              HALLUCINATION: { icon: '👻', color: 'text-red-400', bg: 'bg-red-500/20' },
-              NOT_VERIFIABLE_CLAIM: { icon: '💬', color: 'text-gray-400', bg: 'bg-gray-500/20' },
-              UNVERIFIED: { icon: '…', color: 'text-gray-500', bg: 'bg-gray-600/20' },
-            };
-            const stat = icons[status] || icons.UNVERIFIED;
-            
-            return (
-              <div key={status} className={`${stat.bg} p-3 rounded-lg border border-gray-600/30 text-center`}>
-                <div className="text-2xl mb-1">{stat.icon}</div>
-                <div className={`text-lg font-bold ${stat.color}`}>{count}</div>
-                <div className="text-xs text-gray-400 capitalize">{status.toLowerCase().replace('_', ' ')}</div>
-              </div>
-            );
-          })}
+      {/* --- NOUVELLE SECTION DE STATISTIQUES REFAITE --- */}
+      <div className="flex-shrink-0 p-4 border-b border-gray-700/50 space-y-4">
+        {/* Ligne 1: Statistiques de Validation */}
+        <div className="bg-black/20 p-3 rounded-lg border border-gray-700">
+          <h3 className="text-sm font-semibold text-cyan-300 mb-2 flex items-center gap-2">
+            <span className="text-lg">🔧</span> Synthèse de la Validation IA
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-4 gap-y-2">
+            {Object.entries(validationStats).map(([status, count]) => {
+              const config = validationStatConfig[status] || validationStatConfig.UNVERIFIED;
+              return <StatItem key={status} {...config} count={count} />;
+            })}
+          </div>
         </div>
+
+        {/* Ligne 2: Statistiques de Fact-Checking */}
+        {Object.keys(factCheckStats).length > 0 && (
+          <div className="bg-black/20 p-3 rounded-lg border border-gray-700">
+            <h3 className="text-sm font-semibold text-fuchsia-300 mb-2 flex items-center gap-2">
+              <span className="text-lg">🎯</span> Synthèse du Fact-Checking
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-4 gap-y-2">
+              {Object.entries(factCheckStats).map(([status, count]) => {
+                const config = factCheckStatConfig[status] || factCheckStatConfig.UNVERIFIABLE;
+                return <StatItem key={status} {...config} count={count} />;
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Liste des affirmations - Section scrollable */}
@@ -118,6 +162,18 @@ function ExpandedClaimList({ claims, onClaimClick, currentTime }) {
           const borderColor = getBorderColor(claim.validationStatus);
           const backgroundColor = getBackgroundColor(claim.validationStatus, isActive);
           
+          // --- NOUVELLE LOGIQUE POUR LE BLOC FACT-CHECKING ---
+          const isFactCheckSkipped = !claim.verdict && ['HALLUCINATION', 'INACCURATE', 'NOT_VERIFIABLE_CLAIM'].includes(claim.validationStatus);
+          
+          const getSkipReason = () => {
+            switch (claim.validationStatus) {
+              case 'HALLUCINATION': return "L'affirmation a été jugée comme une hallucination.";
+              case 'INACCURATE': return "L'affirmation a été jugée imprécise.";
+              case 'NOT_VERIFIABLE_CLAIM': return "L'affirmation est une opinion ou une question non vérifiable.";
+              default: return "Le fact-checking n'a pas été appliqué.";
+            }
+          };
+
           return (
             <div
               ref={(el) => (claimRefs.current[claim.id] = el)}
@@ -174,10 +230,11 @@ function ExpandedClaimList({ claims, onClaimClick, currentTime }) {
                   <span className="text-fuchsia-400 ml-2">"</span>
                 </p>
               </div>
-
-              {/* SECTION PRINCIPALE : Fact-checking détaillé */}
-              {claim.verdict ? (
-                <div className="mb-4">
+              
+              {/* --- SECTION PRINCIPALE REFAITE : Fact-checking détaillé --- */}
+              <div className="mb-4">
+                {claim.verdict ? (
+                  // CAS 1: Fact-check terminé
                   <div className="bg-gradient-to-r from-cyan-900/30 to-blue-900/30 border border-cyan-500/30 rounded-xl p-5">
                     <div className="flex items-center gap-3 mb-4">
                       <div className="text-2xl">🎯</div>
@@ -185,20 +242,26 @@ function ExpandedClaimList({ claims, onClaimClick, currentTime }) {
                     </div>
                     <FactCheckIcon claim={claim} extended={true} />
                   </div>
-                </div>
-              ) : (
-                <div className="mb-4">
+                ) : isFactCheckSkipped ? (
+                  // CAS 2: Fact-check non applicable
+                  <div className="bg-gray-800/40 border border-dashed border-gray-600/50 rounded-xl p-5">
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="text-xl text-gray-400">🚫</div>
+                      <h3 className="text-lg font-bold text-gray-400">Fact-Checking Non Applicable</h3>
+                    </div>
+                    <p className="text-sm text-gray-400 pl-8">{getSkipReason()}</p>
+                  </div>
+                ) : (
+                  // CAS 3: Fact-check en attente ou non activé
                   <div className="bg-gradient-to-r from-gray-900/30 to-gray-800/30 border border-gray-600/30 rounded-xl p-5">
                     <div className="flex items-center gap-3 mb-3">
                       <div className="text-xl">⏳</div>
-                      <h3 className="text-lg font-bold text-gray-300">Fact-checking en cours...</h3>
+                      <h3 className="text-lg font-bold text-gray-300">Fact-checking en attente...</h3>
                     </div>
-                    <p className="text-sm text-gray-400">
-                      Cette affirmation est en cours de vérification par nos sources externes.
-                    </p>
+                    <p className="text-sm text-gray-400">Cette affirmation sera vérifiée si l'option est activée et si elle est jugée valide.</p>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
 
               {/* SECTION SECONDAIRE : Validation technique discrète */}
               <div className="flex items-center gap-2 text-xs text-gray-500">
