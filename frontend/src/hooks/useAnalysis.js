@@ -33,15 +33,15 @@ export function useAnalysis() {
     }
   }, []);
 
-  const startAnalysis = useCallback(async (url, provider, withValidation) => { // Ajout du paramètre
+  const startAnalysis = useCallback(async (url, provider, withValidation, withFactChecking) => { // Ajout des paramètres
     stopPolling();
     setIsLoading(true); // Seul le chargement initial utilise cet état
     setError(null);
     setAnalysis(null);
 
     try {
-      // On passe le paramètre à l'appel API
-      const initialAnalysis = await createAnalysis(url, provider, withValidation);
+      // On passe les paramètres à l'appel API
+      const initialAnalysis = await createAnalysis(url, provider, withValidation, withFactChecking);
       setAnalysis(initialAnalysis);
 
       if (initialAnalysis.status === 'COMPLETE') {
@@ -59,7 +59,7 @@ export function useAnalysis() {
     }
   }, [pollAnalysis]);
 
-  const rerunClaimExtraction = useCallback(async (id, withValidation) => { // <-- Accepte le paramètre
+  const rerunClaimExtraction = useCallback(async (id, withValidation, withFactChecking) => { // <-- Accepte les paramètres
     stopPolling();
     setError(null);
     try {
@@ -71,8 +71,8 @@ export function useAnalysis() {
         claims: [],
       }));
 
-      // On passe la valeur à l'API
-      await reRunClaims(id, withValidation);
+      // On passe les valeurs à l'API
+      await reRunClaims(id, withValidation, withFactChecking);
 
       pollingIntervalRef.current = setInterval(() => {
         pollAnalysis(id);

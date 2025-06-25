@@ -71,21 +71,32 @@ model Claim {
   validationExplanation String? @db.Text  // L'explication du LLM juge.
   validationScore Float?                  // La confiance du juge dans son propre verdict (0 à 1).
 
-  verdict         Verdict? // Le verdict du fact-checking (étape future)
+  // --- NOUVEAUX CHAMPS DE FACT-CHECKING ---
+  factCheckStatus ProcessStatus? @default(PENDING) // Statut du processus de fact-checking
+  verdict         FactCheckVerdict? // Le verdict du fact-checking
+  verdictReason   String? @db.Text // Explication du verdict de fact-checking
+  sources         Json? // Sources utilisées pour le fact-checking (format JSON)
+  
+  // --- CHAMPS LEGACY (à supprimer plus tard) ---
   confidenceScore Float?
   explanation     String?  @db.Text
-  sources         Source[]
   createdAt       DateTime @default(now())
 }
 
-// Modèle pour une source de vérification
-model Source {
-  id          Int      @id @default(autoincrement())
-  claim       Claim    @relation(fields: [claimId], references: [id])
-  claimId     Int
-  url         String
-  title       String?
-  createdAt   DateTime @default(now())
+// ENUM pour le statut de processus (fact-checking, etc.)
+enum ProcessStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+// ENUM pour les verdicts de fact-checking
+enum FactCheckVerdict {
+  TRUE
+  FALSE
+  MISLEADING
+  UNVERIFIABLE
 }
 
 // NOUVEL ENUM pour le statut de validation des claims
@@ -104,7 +115,8 @@ enum Status {
  FETCHING_METADATA
  TRANSCRIBING
  EXTRACTING_CLAIMS
- VALIDATING_CLAIMS // <-- NOUVEAU STATUT
+ VALIDATING_CLAIMS
+ FACT_CHECKING // <-- NOUVEAU STATUT POUR LE FACT-CHECKING
  PARTIALLY_COMPLETE // <-- NOUVEAU STATUT POUR LE CHARGEMENT PROGRESSIF
  COMPLETE
  FAILED

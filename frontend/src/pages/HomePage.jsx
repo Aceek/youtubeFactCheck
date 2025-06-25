@@ -10,16 +10,18 @@ function HomePage() {
   const [playerKey, setPlayerKey] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [runValidationOnSubmit, setRunValidationOnSubmit] = useState(false);
+  const [runFactCheckingOnSubmit, setRunFactCheckingOnSubmit] = useState(false);
 
   const handleRerun = () => {
     if (analysis) {
-      rerunClaimExtraction(analysis.id, runValidationOnSubmit);
+      rerunClaimExtraction(analysis.id, runValidationOnSubmit, runFactCheckingOnSubmit);
     }
   };
   
-  const handleFormSubmit = (url, provider, withValidation) => {
+  const handleFormSubmit = (url, provider, withValidation, withFactChecking) => {
     setRunValidationOnSubmit(withValidation);
-    startAnalysis(url, provider, withValidation);
+    setRunFactCheckingOnSubmit(withFactChecking);
+    startAnalysis(url, provider, withValidation, withFactChecking);
   };
 
   useEffect(() => {
@@ -58,6 +60,8 @@ function HomePage() {
         isLoading={isLoading} // Le bouton est "loading" tant que le processus global est en cours
         runValidation={runValidationOnSubmit}
         setRunValidation={setRunValidationOnSubmit}
+        runFactChecking={runFactCheckingOnSubmit}
+        setRunFactChecking={setRunFactCheckingOnSubmit}
       />
       
       {error && (
@@ -69,7 +73,7 @@ function HomePage() {
 
       {/* Le statut est maintenant affiché PENDANT que les résultats se construisent */}
       {isAnalysisRunning && (
-        <AnalysisStatus analysis={analysis} withValidation={runValidationOnSubmit} />
+        <AnalysisStatus analysis={analysis} withValidation={runValidationOnSubmit} withFactChecking={runFactCheckingOnSubmit} />
       )}
       
       {showResults && (

@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useEffect } from 'react';
+import FactCheckIcon from './FactCheckIcon';
 
 // Icônes de statut avec plus de détails pour le mode étendu
 const ValidationIcon = ({ status, explanation }) => {
@@ -239,11 +240,14 @@ function ExpandedClaimList({ claims, onClaimClick, currentTime }) {
                 </p>
               </div>
 
-              {/* Statut de validation */}
-              <ValidationIcon 
-                status={claim.validationStatus} 
-                explanation={claim.validationExplanation} 
-              />
+              {/* Statuts de validation et fact-checking */}
+              <div className="flex items-start gap-4">
+                <ValidationIcon
+                  status={claim.validationStatus}
+                  explanation={claim.validationExplanation}
+                />
+                <FactCheckIcon claim={claim} />
+              </div>
             </div>
           );
         })}

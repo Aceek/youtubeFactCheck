@@ -37,7 +37,7 @@ const ProgressBar = ({ progress, label }) => (
   </div>
 );
 
-function AnalysisStatus({ analysis, withValidation }) {
+function AnalysisStatus({ analysis, withValidation, withFactChecking }) {
   // Sécurité : si analysis est null ou ne contient pas de status, on n'affiche rien
   if (!analysis || !analysis.status) return null;
 
@@ -53,6 +53,10 @@ function AnalysisStatus({ analysis, withValidation }) {
     baseSteps.push({ status: 'VALIDATING_CLAIMS', label: 'Validation des affirmations' });
   }
 
+  if (withFactChecking) {
+    baseSteps.push({ status: 'FACT_CHECKING', label: 'Vérification des faits' });
+  }
+
   baseSteps.push({ status: 'COMPLETE', label: 'Analyse terminée' });
 
   const steps = baseSteps;
@@ -64,10 +68,17 @@ function AnalysisStatus({ analysis, withValidation }) {
   if (analysis.status === 'PARTIALLY_COMPLETE') {
     // Déterminer quelle étape est en cours selon le contexte
     if (analysis.claims && analysis.claims.length > 0) {
-      // Si on a des claims, on est probablement en validation
-      currentStepIndex = withValidation
-        ? steps.findIndex(step => step.status === 'VALIDATING_CLAIMS')
-        : steps.findIndex(step => step.status === 'EXTRACTING_CLAIMS');
+      // Si on a des claims, déterminer l'étape selon les options activées
+      if (withFactChecking && analysis.claims.some(claim => claim.factCheckStatus)) {
+        // Si le fact-checking est activé et qu'on a des claims avec factCheckStatus, on est en fact-checking
+        currentStepIndex = steps.findIndex(step => step.status === 'FACT_CHECKING');
+      } else if (withValidation) {
+        // Sinon si la validation est activée, on est en validation
+        currentStepIndex = steps.findIndex(step => step.status === 'VALIDATING_CLAIMS');
+      } else {
+        // Sinon on est encore en extraction
+        currentStepIndex = steps.findIndex(step => step.status === 'EXTRACTING_CLAIMS');
+      }
     } else {
       // Sinon on est en extraction
       currentStepIndex = steps.findIndex(step => step.status === 'EXTRACTING_CLAIMS');
@@ -82,9 +93,18 @@ function AnalysisStatus({ analysis, withValidation }) {
     if (analysis.status === 'EXTRACTING_CLAIMS' ||
         (analysis.status === 'PARTIALLY_COMPLETE' && (!analysis.claims || analysis.claims.length === 0))) {
       return 'Extraction en cours';
-    } else if (analysis.status === 'VALIDATING_CLAIMS' ||
-               (analysis.status === 'PARTIALLY_COMPLETE' && analysis.claims && analysis.claims.length > 0)) {
+    } else if (analysis.status === 'VALIDATING_CLAIMS') {
       return 'Validation en cours';
+    } else if (analysis.status === 'FACT_CHECKING') {
+      return 'Fact-checking en cours';
+    } else if (analysis.status === 'PARTIALLY_COMPLETE' && analysis.claims && analysis.claims.length > 0) {
+      // Déterminer l'étape en cours pour PARTIALLY_COMPLETE
+      if (withFactChecking && analysis.claims.some(claim => claim.factCheckStatus)) {
+        return 'Fact-checking en cours';
+      } else if (withValidation) {
+        return 'Validation en cours';
+      }
+      return 'Traitement en cours';
     }
     return 'Traitement en cours';
   };
@@ -98,6 +118,7 @@ function AnalysisStatus({ analysis, withValidation }) {
       {/* Barre de progression pour les étapes avec progrès */}
       {(analysis.status === 'EXTRACTING_CLAIMS' ||
         analysis.status === 'VALIDATING_CLAIMS' ||
+        analysis.status === 'FACT_CHECKING' ||
         analysis.status === 'PARTIALLY_COMPLETE') && progress >= 0 && (
         <ProgressBar progress={progress} label={getProgressLabel()} />
       )}
@@ -136,12 +157,16 @@ function AnalysisStatus({ analysis, withValidation }) {
                 {visualState === 'in-progress' &&
                  (analysis.status === 'PARTIALLY_COMPLETE' ||
                   analysis.status === 'EXTRACTING_CLAIMS' ||
-                  analysis.status === 'VALIDATING_CLAIMS') &&
+                  analysis.status === 'VALIDATING_CLAIMS' ||
+                  analysis.status === 'FACT_CHECKING') &&
                  progress > 0 && (
                   <p className="text-sm text-cyan-400/80 mt-1">
                     {progress}% terminé
-                    {analysis.claims && analysis.claims.length > 0 &&
-                     ` • ${analysis.claims.length} affirmation${analysis.claims.length > 1 ? 's' : ''} trouvée${analysis.claims.length > 1 ? 's' : ''}`}
+                    {analysis.claims && analysis.claims.length > 0 && (
+                      analysis.status === 'FACT_CHECKING'
+                        ? ` • ${analysis.claims.filter(c => c.verdict).length}/${analysis.claims.length} affirmation${analysis.claims.length > 1 ? 's' : ''} vérifiée${analysis.claims.length > 1 ? 's' : ''}`
+                        : ` • ${analysis.claims.length} affirmation${analysis.claims.length > 1 ? 's' : ''} trouvée${analysis.claims.length > 1 ? 's' : ''}`
+                    )}
                   </p>
                 )}
               </div>

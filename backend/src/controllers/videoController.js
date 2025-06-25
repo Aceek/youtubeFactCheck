@@ -2,11 +2,11 @@ const videoService = require('../services/videoService');
 
 async function createAnalysis(req, res, next) {
   // La validation est déjà faite par le middleware dans videoRoutes.js
-  const { youtubeUrl, transcriptionProvider, withValidation } = req.body;
+  const { youtubeUrl, transcriptionProvider, withValidation, withFactChecking } = req.body;
   
   try {
     // Le service retourne maintenant un objet { analysis, fromCache }
-    const result = await videoService.startAnalysis(youtubeUrl, transcriptionProvider, withValidation);
+    const result = await videoService.startAnalysis(youtubeUrl, transcriptionProvider, withValidation, withFactChecking);
 
     if (result.fromCache) {
       // --- FIX #3 : Si c'est du cache, on renvoie 200 OK avec les données finales ---
@@ -36,12 +36,12 @@ async function getAnalysis(req, res, next) {
 // --- NOUVEAU CONTRÔLEUR ---
 async function rerunClaimExtraction(req, res, next) {
   const { id } = req.params;
-  // --- CORRECTION : On récupère withValidation depuis le corps de la requête ---
-  const { withValidation } = req.body;
+  // --- CORRECTION : On récupère withValidation et withFactChecking depuis le corps de la requête ---
+  const { withValidation, withFactChecking } = req.body;
   
   try {
-    // On passe la valeur au service
-    const analysis = await videoService.rerunClaimExtraction(parseInt(id, 10), withValidation);
+    // On passe les valeurs au service
+    const analysis = await videoService.rerunClaimExtraction(parseInt(id, 10), withValidation, withFactChecking);
     res.status(202).json(analysis);
   } catch (error) {
     next(error);

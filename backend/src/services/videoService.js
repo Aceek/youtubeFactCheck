@@ -1,6 +1,7 @@
 const { PrismaClient } = require("@prisma/client");
 const claimExtractionService = require("./claimExtractionService");
 const { validateClaimsChunk, mockValidateClaim } = require("./claimValidationService");
+const factCheckingService = require("./factCheckingService");
 const { chunkTranscript, getClaimsForChunk } = require("../utils/chunkUtils");
 const debugLogService = require('./debugLogService');
 const metadataService = require('./metadataService');
@@ -23,8 +24,8 @@ async function getAnalysisById(id) {
   });
 }
 
-async function startAnalysis(youtubeUrl, transcriptionProvider, withValidation) {
-  console.log(`Début de l'analyse pour l'URL: ${youtubeUrl} avec le fournisseur: ${transcriptionProvider}, validation: ${withValidation}`);
+async function startAnalysis(youtubeUrl, transcriptionProvider, withValidation, withFactChecking = false) {
+  console.log(`Début de l'analyse pour l'URL: ${youtubeUrl} avec le fournisseur: ${transcriptionProvider}, validation: ${withValidation}, fact-checking: ${withFactChecking}`);
   const videoId = transcriptionService.extractVideoId(youtubeUrl);
   if (!videoId) throw new Error('URL YouTube invalide.');
 
@@ -40,7 +41,7 @@ async function startAnalysis(youtubeUrl, transcriptionProvider, withValidation) 
     const analysis = await prisma.analysis.create({
       data: { videoId: video.id, status: 'PENDING' },
     });
-    runFullProcess(analysis.id, youtubeUrl, transcriptionProvider, withValidation);
+    runFullProcess(analysis.id, youtubeUrl, transcriptionProvider, withValidation, withFactChecking);
     const initialAnalysisWithVideo = { ...analysis, video: video };
     return { analysis: initialAnalysisWithVideo, fromCache: false };
   } else {
@@ -63,7 +64,7 @@ async function startAnalysis(youtubeUrl, transcriptionProvider, withValidation) 
       const newAnalysis = await prisma.analysis.create({
         data: { videoId: videoId, status: 'PENDING' },
       });
-      runClaimExtractionProcess(newAnalysis.id, lastAnalysis.transcription, transcriptionProvider, true);
+      runClaimExtractionProcess(newAnalysis.id, lastAnalysis.transcription, transcriptionProvider, withValidation, withFactChecking);
       const newAnalysisWithVideo = { ...newAnalysis, video: lastAnalysis.video };
       return { analysis: newAnalysisWithVideo, fromCache: false };
     }
@@ -77,13 +78,13 @@ async function startAnalysis(youtubeUrl, transcriptionProvider, withValidation) 
     const analysis = await prisma.analysis.create({
       data: { videoId: video.id, status: 'PENDING' },
     });
-    runFullProcess(analysis.id, youtubeUrl, transcriptionProvider, withValidation);
+    runFullProcess(analysis.id, youtubeUrl, transcriptionProvider, withValidation, withFactChecking);
     const initialAnalysisWithVideo = { ...analysis, video: video };
     return { analysis: initialAnalysisWithVideo, fromCache: false };
   }
 }
 
-async function runFullProcess(analysisId, youtubeUrl, provider, withValidation) {
+async function runFullProcess(analysisId, youtubeUrl, provider, withValidation, withFactChecking = false) {
     try {
         await prisma.analysis.update({ where: { id: analysisId }, data: { status: 'FETCHING_METADATA' } });
         const metadata = await metadataService.getVideoMetadata(youtubeUrl);
@@ -118,7 +119,7 @@ async function runFullProcess(analysisId, youtubeUrl, provider, withValidation) 
                 fullText: transcriptData.fullText,
             }
         });
-        await runClaimExtractionProcess(analysisId, transcription, provider, withValidation);
+        await runClaimExtractionProcess(analysisId, transcription, provider, withValidation, withFactChecking);
     } catch (criticalError) {
         console.error(`Échec critique du processus pour l'analyse ${analysisId}:`, criticalError.message);
         await prisma.analysis.update({
@@ -128,7 +129,7 @@ async function runFullProcess(analysisId, youtubeUrl, provider, withValidation) 
     }
 }
 
-async function runClaimExtractionProcess(analysisId, transcription, provider, withValidation) {
+async function runClaimExtractionProcess(analysisId, transcription, provider, withValidation, withFactChecking = false) {
   try {
     const currentLlmModel = provider === 'MOCK_PROVIDER'
       ? 'MOCK_PROVIDER'
@@ -176,6 +177,32 @@ async function runClaimExtractionProcess(analysisId, transcription, provider, wi
 
     if (withValidation && createdClaims.length > 0) {
       await runClaimValidationProcess(analysisId, createdClaims, transcription.content.paragraphs, provider);
+    }
+
+    // NOUVELLE ÉTAPE: Fact-checking des claims
+    if (withFactChecking && createdClaims.length > 0) {
+      let claimsToFactCheck;
+      if (withValidation) {
+        // Cas standard : on ne vérifie que les claims jugés valides
+        // Récupérer les claims mis à jour après validation
+        const updatedClaims = await prisma.claim.findMany({
+          where: { analysisId },
+          orderBy: { timestamp: 'asc' }
+        });
+        claimsToFactCheck = updatedClaims.filter(c => c.validationStatus === 'VALID');
+        console.log(`🔍 Fact-checking activé: ${claimsToFactCheck.length} claims valides à vérifier sur ${updatedClaims.length} total`);
+      } else {
+        // Cas où la validation est désactivée : on vérifie tous les claims
+        claimsToFactCheck = createdClaims;
+        console.log(`🔍 Fact-checking activé: ${claimsToFactCheck.length} claims à vérifier (validation désactivée)`);
+      }
+
+      if (claimsToFactCheck.length > 0) {
+        // Lancer le processus de fact-checking sur les claims filtrés
+        await factCheckingService.runFactCheckingForAnalysis(analysisId, claimsToFactCheck);
+      } else {
+        console.log(`ℹ️ Aucun claim à fact-checker pour l'analyse ${analysisId}`);
+      }
     }
     
     // Générer le rapport final via le service dédié
@@ -422,8 +449,8 @@ async function runClaimValidationProcess(analysisId, claims, paragraphs, provide
 }
 
 
-async function rerunClaimExtraction(analysisId, withValidation) {
-  console.log(`RE-ANALYSE manuelle des claims pour l'analyse ID: ${analysisId}, validation: ${withValidation}`);
+async function rerunClaimExtraction(analysisId, withValidation, withFactChecking = false) {
+  console.log(`RE-ANALYSE manuelle des claims pour l'analyse ID: ${analysisId}, validation: ${withValidation}, fact-checking: ${withFactChecking}`);
   
   const analysisToRerun = await prisma.analysis.findUnique({
     where: { id: analysisId },
@@ -447,7 +474,7 @@ async function rerunClaimExtraction(analysisId, withValidation) {
     data: { status: 'PENDING' }
   });
 
-  runClaimExtractionProcess(analysisId, analysisToRerun.transcription, analysisToRerun.transcription.provider, withValidation);
+  runClaimExtractionProcess(analysisId, analysisToRerun.transcription, analysisToRerun.transcription.provider, withValidation, withFactChecking);
 
   const updatedAnalysisWithVideo = {
     ...updatedAnalysis,

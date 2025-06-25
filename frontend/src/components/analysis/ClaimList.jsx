@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useEffect } from 'react';
+import FactCheckIcon from './FactCheckIcon';
 
 // Icônes de statut
 const ValidationIcon = ({ status, explanation }) => {
@@ -117,7 +118,10 @@ function ClaimList({ claims, onClaimClick, currentTime }) {
                 <p className={`text-lg transition-colors flex-1 ${isActive ? 'text-white' : 'text-gray-200 group-hover:text-white'}`}>
                   "{claim.text}"
                 </p>
-                <ValidationIcon status={claim.validationStatus} explanation={claim.validationExplanation} />
+                <div className="flex items-center gap-2">
+                  <ValidationIcon status={claim.validationStatus} explanation={claim.validationExplanation} />
+                  <FactCheckIcon claim={claim} />
+                </div>
               </div>
               <div className="text-right mt-3">
                 <span

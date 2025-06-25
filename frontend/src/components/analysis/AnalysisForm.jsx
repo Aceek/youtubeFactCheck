@@ -5,7 +5,7 @@ const YOUTUBE_URL_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/
 
 // ...
 // On reçoit l'état et le setter en props
-function AnalysisForm({ onSubmit, isLoading, runValidation, setRunValidation }) {
+function AnalysisForm({ onSubmit, isLoading, runValidation, setRunValidation, runFactChecking, setRunFactChecking }) {
   const [url, setUrl] = useState('');
   const [provider, setProvider] = useState('MOCK_PROVIDER');
   const [formError, setFormError] = useState('');
@@ -32,7 +32,7 @@ function AnalysisForm({ onSubmit, isLoading, runValidation, setRunValidation }) 
     }
     
     setFormError(''); // On efface toute erreur précédente
-    onSubmit(url, provider, runValidation);
+    onSubmit(url, provider, runValidation, runFactChecking);
   };
   
   return (
@@ -101,24 +101,63 @@ function AnalysisForm({ onSubmit, isLoading, runValidation, setRunValidation }) 
           </div>
         </fieldset>
 
-        {/* Ajoutez ce bloc à l'intérieur de la balise <form> */}
-        <div className="flex items-center justify-start pt-2">
-          <label htmlFor="validation-toggle" className="flex items-center cursor-pointer">
-            <div className="relative">
-              <input
-                id="validation-toggle"
-                type="checkbox"
-                className="sr-only"
-                checked={runValidation} // On utilise la prop
-                onChange={() => setRunValidation(!runValidation)} // On utilise la prop
-              />
-              <div className="block bg-gray-600 w-14 h-8 rounded-full"></div>
-              <div className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform ${runValidation ? 'translate-x-6 bg-cyan-400' : ''}`}></div>
+        {/* Options avancées */}
+        <div className="space-y-4 pt-2">
+          {/* Toggle de validation */}
+          <div className="flex items-center justify-start">
+            <label htmlFor="validation-toggle" className="flex items-center cursor-pointer">
+              <div className="relative">
+                <input
+                  id="validation-toggle"
+                  type="checkbox"
+                  className="sr-only"
+                  checked={runValidation}
+                  onChange={() => {
+                    const newValidation = !runValidation;
+                    setRunValidation(newValidation);
+                    // Si on désactive la validation, on désactive aussi le fact-checking
+                    if (!newValidation && runFactChecking) {
+                      setRunFactChecking(false);
+                    }
+                  }}
+                />
+                <div className="block bg-gray-600 w-14 h-8 rounded-full"></div>
+                <div className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform ${runValidation ? 'translate-x-6 bg-cyan-400' : ''}`}></div>
+              </div>
+              <div className="ml-3 text-gray-200 font-medium">
+                Activer la validation des affirmations <span className="text-xs text-gray-400">(plus lent)</span>
+              </div>
+            </label>
+          </div>
+
+          {/* Toggle de fact-checking */}
+          <div className="flex items-center justify-start">
+            <label htmlFor="factcheck-toggle" className={`flex items-center cursor-pointer ${!runValidation ? 'opacity-50' : ''}`}>
+              <div className="relative">
+                <input
+                  id="factcheck-toggle"
+                  type="checkbox"
+                  className="sr-only"
+                  checked={runFactChecking && runValidation}
+                  disabled={!runValidation}
+                  onChange={() => setRunFactChecking(!runFactChecking)}
+                />
+                <div className={`block w-14 h-8 rounded-full ${runValidation ? 'bg-gray-600' : 'bg-gray-700'}`}></div>
+                <div className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform ${runFactChecking && runValidation ? 'translate-x-6 bg-fuchsia-400' : ''}`}></div>
+              </div>
+              <div className="ml-3 text-gray-200 font-medium">
+                Activer le fact-checking <span className="text-xs text-gray-400">(très lent, nécessite la validation)</span>
+              </div>
+            </label>
+          </div>
+
+          {runFactChecking && runValidation && (
+            <div className="bg-fuchsia-900/20 border border-fuchsia-400/30 rounded-lg p-3 mt-2">
+              <p className="text-fuchsia-200 text-sm">
+                <span className="font-semibold">⚡ Fact-checking activé :</span> Les affirmations validées seront vérifiées via Google Fact Check et recherche web. Cette étape peut prendre plusieurs minutes.
+              </p>
             </div>
-            <div className="ml-3 text-gray-200 font-medium">
-              Activer la validation des affirmations <span className="text-xs text-gray-400">(plus lent)</span>
-            </div>
-          </label>
+          )}
         </div>
         {/* ... */}
       </form>

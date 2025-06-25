@@ -1,0 +1,21 @@
+Tu es un expert en recherche d'informations. Pour chaque affirmation fournie dans la liste JSON ci-dessous, génère exactement 3 requêtes de recherche Google optimisées pour vérifier sa véracité.
+
+**Instructions :**
+- Les requêtes doivent être courtes, précises (5-8 mots) et factuelles.
+- Varie les angles de recherche pour chaque affirmation.
+- Ta réponse DOIT être un objet JSON valide contenant une clé "queries".
+- La clé "queries" doit contenir une liste d'objets. Chaque objet doit avoir un "claim_id" (correspondant à l'ID fourni en entrée) et une clé "searches" contenant la liste des 3 requêtes.
+
+**Format de Sortie Impératif :**
+{
+  "queries": [
+    {
+      "claim_id": "some_claim_id_1",
+      "searches": ["requête 1a", "requête 1b", "requête 1c"]
+    },
+    {
+      "claim_id": "some_claim_id_2",
+      "searches": ["requête 2a", "requête 2b", "requête 2c"]
+    }
+  ]
+}
