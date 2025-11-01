@@ -1,0 +1,32 @@
+{
+  "model": "sonnet-4.5",
+
+  "permissions": {
+    "deny": [
+      ".env",
+      ".env.*",
+      "!.env.example",
+      "node_modules/**",
+      ".git/**",
+      "dist/**",
+      "build/**",
+      "backend/results/**",
+      "postgres_password.txt"
+    ],
+
+    "allow": [
+      ".claude/**",
+      "**/*.ts",
+      "**/*.tsx",
+      "**/*.js",
+      "**/*.jsx",
+      "**/*.json",
+      "**/*.md",
+      "**/*.prisma",
+      "**/*.txt",
+      "backend/src/prompts/*.txt",
+      "docker-compose.yml",
+      "Dockerfile"
+    ]
+  }
+}
