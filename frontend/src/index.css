@@ -1,1 +1,270 @@
 @import "tailwindcss";
+
+/* ============================================================
+   FactLens — Design system "Dark command center"
+   Tailwind v4 : tokens via @theme, utilitaires via @layer.
+   ============================================================ */
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Surfaces (slate profond, légèrement bleuté) */
+  --color-base: #080b10;
+  --color-surface: #0e131b;
+  --color-elevated: #141b25;
+  --color-raised: #1a2331;
+  --color-line: #1f2937;
+  --color-line-soft: #161e29;
+
+  /* Texte */
+  --color-ink: #e9eef5;
+  --color-muted: #8b97a8;
+  --color-faint: #5b687a;
+
+  /* Marque : indigo (distinct du warm SOPAI et de l'ancien néon) */
+  --color-brand: #6e7bff;
+  --color-brand-strong: #4f5bff;
+  --color-brand-soft: #a5acff;
+  /* Accent "live" : teal lumineux */
+  --color-live: #2dd4bf;
+
+  /* Animations */
+  --animate-fade-in: fade-in 0.4s ease-out both;
+  --animate-rise: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-scale-in: scale-in 0.22s ease-out both;
+  --animate-pulse-soft: pulse-soft 2s ease-in-out infinite;
+  --animate-pulse-ring: pulse-ring 2.4s ease-out infinite;
+  --animate-shimmer: shimmer 1.8s linear infinite;
+  --animate-sweep: sweep 2.2s ease-in-out infinite;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.45); }
+  70% { box-shadow: 0 0 0 9px rgba(45, 212, 191, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0); }
+}
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to { background-position: 200% 0; }
+}
+@keyframes sweep {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(420%); }
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    margin: 0;
+    background-color: var(--color-base);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: rgba(110, 123, 255, 0.3);
+    color: #fff;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+@layer components {
+  /* Carte / panneau standard du "poste d'analyse" */
+  .panel {
+    @apply rounded-2xl border border-line bg-surface/80 backdrop-blur-xl;
+    box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
+      0 24px 60px -30px rgba(0, 0, 0, 0.9);
+  }
+  .panel-raised {
+    @apply rounded-2xl border border-line bg-elevated/90 backdrop-blur-xl;
+    box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
+      0 30px 70px -32px rgba(0, 0, 0, 0.95);
+  }
+
+  /* Champ de saisie */
+  .field {
+    @apply w-full rounded-xl border border-line bg-base/60 px-4 py-3 text-ink
+      placeholder:text-faint transition-all duration-200;
+  }
+  .field:focus {
+    @apply outline-none border-brand/70;
+    box-shadow: 0 0 0 4px rgba(110, 123, 255, 0.15);
+  }
+
+  /* Bouton d'action principal */
+  .btn-accent {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3
+      font-semibold text-white transition-all duration-200;
+    background: linear-gradient(135deg, var(--color-brand-strong), var(--color-brand));
+    box-shadow: 0 10px 30px -12px rgba(79, 91, 255, 0.8);
+  }
+  .btn-accent:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 14px 34px -10px rgba(79, 91, 255, 0.9);
+  }
+  .btn-accent:disabled {
+    background: var(--color-raised);
+    color: var(--color-faint);
+    box-shadow: none;
+    transform: none;
+    cursor: not-allowed;
+  }
+
+  /* Bouton secondaire / ghost */
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-line
+      bg-elevated/60 px-4 py-2 text-sm font-medium text-muted transition-all duration-200;
+  }
+  .btn-ghost:hover {
+    @apply border-brand/40 text-ink bg-raised/60;
+  }
+
+  /* Puce / étiquette mono */
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-md border border-line bg-base/50
+      px-2 py-1 font-mono text-xs text-muted;
+  }
+
+  /* Étiquette de section discrète */
+  .eyebrow {
+    @apply text-xs font-semibold uppercase tracking-[0.18em] text-faint;
+  }
+}
+
+/* ---- Ambiance de fond (grille + lueurs) ---- */
+.app-ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 40rem at 12% -8%, rgba(110, 123, 255, 0.14), transparent 60%),
+    radial-gradient(50rem 36rem at 100% 0%, rgba(45, 212, 191, 0.10), transparent 55%),
+    radial-gradient(60rem 50rem at 50% 120%, rgba(79, 91, 255, 0.10), transparent 60%);
+}
+.app-ambient::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(80rem 60rem at 50% -10%, #000 30%, transparent 80%);
+}
+
+/* ---- Barre de progression "shimmer" ---- */
+.progress-track {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-line-soft);
+}
+.progress-fill {
+  position: relative;
+  background: linear-gradient(90deg, var(--color-brand-strong), var(--color-brand), var(--color-live));
+  transition: width 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.progress-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  animation: var(--animate-sweep);
+}
+
+/* ============================================================
+   Scrollbars (noms conservés pour compat avec les composants)
+   ============================================================ */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-custom {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(110, 123, 255, 0.5) transparent;
+}
+.scrollbar-custom::-webkit-scrollbar {
+  width: 6px;
+}
+.scrollbar-custom::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-custom::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(110, 123, 255, 0.6), rgba(45, 212, 191, 0.6));
+  border-radius: 3px;
+}
+.scrollbar-custom::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(110, 123, 255, 0.9), rgba(45, 212, 191, 0.9));
+}
+.scrollbar-modal {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(110, 123, 255, 0.6) transparent;
+}
+.scrollbar-modal::-webkit-scrollbar {
+  width: 8px;
+}
+.scrollbar-modal::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-modal::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(110, 123, 255, 0.7), rgba(45, 212, 191, 0.7));
+  border-radius: 4px;
+  border: 1px solid rgba(110, 123, 255, 0.2);
+}
+.scrollbar-modal::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(110, 123, 255, 1), rgba(45, 212, 191, 1));
+}
+.scrollbar-elegant {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(110, 123, 255, 0.45) transparent;
+}
+.scrollbar-elegant::-webkit-scrollbar {
+  width: 4px;
+}
+.scrollbar-elegant::-webkit-scrollbar-thumb {
+  background: rgba(110, 123, 255, 0.55);
+  border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,189 +1,186 @@
-import React from 'react';
+import Icon from '../common/Icon';
 
-// Composants SVG pour les icônes
-const CheckIcon = () => (
-  <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
-  </svg>
-);
-
-const SpinnerIcon = () => (
-  <svg className="animate-spin w-5 h-5 text-cyan-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-  </svg>
-);
-
-const DotIcon = () => (
-  <div className="w-5 h-5 flex items-center justify-center">
-      <div className="w-2 h-2 bg-gray-500 rounded-full"></div>
-  </div>
-);
-
-
-// Composant pour la barre de progression
-const ProgressBar = ({ progress, label }) => (
-  <div className="mt-4 mb-6">
-    <div className="flex justify-between items-center mb-2">
-      <span className="text-sm text-cyan-300 font-medium">{label}</span>
-      <span className="text-sm text-cyan-300 font-bold">{progress}%</span>
+// Barre de progression avec effet "shimmer"
+const ProgressBar = ({ progress, label }) => {
+  const pct = Math.max(0, Math.min(100, progress));
+  return (
+    <div className="mb-7">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="flex items-center gap-2 text-sm font-medium text-muted">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full rounded-full bg-live opacity-60 animate-pulse-soft" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-live" />
+          </span>
+          {label}
+        </span>
+        <span className="font-mono text-sm font-semibold text-brand-soft">{pct}%</span>
+      </div>
+      <div className="progress-track h-2.5 w-full rounded-full">
+        <div className="progress-fill h-full rounded-full" style={{ width: `${pct}%` }} />
+      </div>
     </div>
-    <div className="w-full bg-gray-700/50 rounded-full h-3 overflow-hidden">
-      <div
-        className="h-full bg-gradient-to-r from-cyan-400 to-fuchsia-400 rounded-full transition-all duration-500 ease-out"
-        style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
-      />
-    </div>
-  </div>
-);
+  );
+};
 
 function AnalysisStatus({ analysis, withValidation, withFactChecking }) {
-  // Sécurité : si analysis est null ou ne contient pas de status, on n'affiche rien
   if (!analysis || !analysis.status) return null;
 
-  // Définir les étapes de notre processus. C'est facilement extensible pour le futur.
   const baseSteps = [
-    { status: 'PENDING', label: 'Initialisation de l\'analyse' },
-    { status: 'FETCHING_METADATA', label: 'Récupération des informations de la vidéo' },
-    { status: 'TRANSCRIBING', label: 'Téléchargement et Transcription de l\'audio' },
-    { status: 'EXTRACTING_CLAIMS', label: 'Extraction des affirmations factuelles' },
+    { status: 'PENDING', label: 'Initializing analysis', icon: 'gauge' },
+    { status: 'FETCHING_METADATA', label: 'Fetching content information', icon: 'film' },
+    { status: 'TRANSCRIBING', label: 'Transcribing audio', icon: 'doc' },
+    { status: 'EXTRACTING_CLAIMS', label: 'Extracting factual claims', icon: 'sparkle' },
   ];
-
-  if (withValidation) {
-    baseSteps.push({ status: 'VALIDATING_CLAIMS', label: 'Validation des affirmations' });
-  }
-
-  if (withFactChecking) {
-    baseSteps.push({ status: 'FACT_CHECKING', label: 'Vérification des faits' });
-  }
-
-  baseSteps.push({ status: 'COMPLETE', label: 'Analyse terminée' });
+  if (withValidation) baseSteps.push({ status: 'VALIDATING_CLAIMS', label: 'Validating claims', icon: 'shield' });
+  if (withFactChecking) baseSteps.push({ status: 'FACT_CHECKING', label: 'Fact-checking', icon: 'search' });
+  baseSteps.push({ status: 'COMPLETE', label: 'Analysis complete', icon: 'check' });
 
   const steps = baseSteps;
 
-  // Trouver l'index de l'étape actuelle
-  let currentStepIndex = steps.findIndex(step => step.status === analysis.status);
-  
-  // Gérer le statut PARTIALLY_COMPLETE
+  let currentStepIndex = steps.findIndex((step) => step.status === analysis.status);
+
   if (analysis.status === 'PARTIALLY_COMPLETE') {
-    // Déterminer quelle étape est en cours selon le contexte
     if (analysis.claims && analysis.claims.length > 0) {
-      // Si on a des claims, déterminer l'étape selon les options activées
-      if (withFactChecking && analysis.claims.some(claim => claim.factCheckStatus)) {
-        // Si le fact-checking est activé et qu'on a des claims avec factCheckStatus, on est en fact-checking
-        currentStepIndex = steps.findIndex(step => step.status === 'FACT_CHECKING');
+      if (withFactChecking && analysis.claims.some((claim) => claim.factCheckStatus)) {
+        currentStepIndex = steps.findIndex((step) => step.status === 'FACT_CHECKING');
       } else if (withValidation) {
-        // Sinon si la validation est activée, on est en validation
-        currentStepIndex = steps.findIndex(step => step.status === 'VALIDATING_CLAIMS');
+        currentStepIndex = steps.findIndex((step) => step.status === 'VALIDATING_CLAIMS');
       } else {
-        // Sinon on est encore en extraction
-        currentStepIndex = steps.findIndex(step => step.status === 'EXTRACTING_CLAIMS');
+        currentStepIndex = steps.findIndex((step) => step.status === 'EXTRACTING_CLAIMS');
       }
     } else {
-      // Sinon on est en extraction
-      currentStepIndex = steps.findIndex(step => step.status === 'EXTRACTING_CLAIMS');
+      currentStepIndex = steps.findIndex((step) => step.status === 'EXTRACTING_CLAIMS');
     }
   }
 
-  // Obtenir le progrès (par défaut 0 si non défini)
   const progress = analysis.progress || 0;
-  
-  // Déterminer le label de progression
+
   const getProgressLabel = () => {
-    if (analysis.status === 'EXTRACTING_CLAIMS' ||
-        (analysis.status === 'PARTIALLY_COMPLETE' && (!analysis.claims || analysis.claims.length === 0))) {
-      return 'Extraction en cours';
+    if (
+      analysis.status === 'EXTRACTING_CLAIMS' ||
+      (analysis.status === 'PARTIALLY_COMPLETE' && (!analysis.claims || analysis.claims.length === 0))
+    ) {
+      return 'Extracting';
     } else if (analysis.status === 'VALIDATING_CLAIMS') {
-      return 'Validation en cours';
+      return 'Validating';
     } else if (analysis.status === 'FACT_CHECKING') {
-      return 'Fact-checking en cours';
+      return 'Fact-checking';
     } else if (analysis.status === 'PARTIALLY_COMPLETE' && analysis.claims && analysis.claims.length > 0) {
-      // Déterminer l'étape en cours pour PARTIALLY_COMPLETE
-      if (withFactChecking && analysis.claims.some(claim => claim.factCheckStatus)) {
-        return 'Fact-checking en cours';
-      } else if (withValidation) {
-        return 'Validation en cours';
-      }
-      return 'Traitement en cours';
+      if (withFactChecking && analysis.claims.some((claim) => claim.factCheckStatus)) return 'Fact-checking';
+      if (withValidation) return 'Validating';
+      return 'Processing';
     }
-    return 'Traitement en cours';
+    return 'Processing';
   };
 
+  const showProgressBar =
+    analysis.status === 'EXTRACTING_CLAIMS' ||
+    analysis.status === 'VALIDATING_CLAIMS' ||
+    analysis.status === 'FACT_CHECKING' ||
+    analysis.status === 'PARTIALLY_COMPLETE';
+
+  const claimsCount = analysis.claims?.length || 0;
+  const verifiedCount = analysis.claims?.filter((c) => c.verdict).length || 0;
+
   return (
-    <div className="bg-black/30 p-8 rounded-xl shadow-2xl border border-cyan-400/20 backdrop-blur-lg animate-fade-in">
-      <h2 className="text-2xl font-bold text-center text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-fuchsia-400 mb-6">
-        {analysis.status === 'COMPLETE' ? 'Analyse terminée !' : 'Analyse en cours...'}
-      </h2>
-      
-      {/* Barre de progression pour les étapes avec progrès */}
-      {(analysis.status === 'EXTRACTING_CLAIMS' ||
-        analysis.status === 'VALIDATING_CLAIMS' ||
-        analysis.status === 'FACT_CHECKING' ||
-        analysis.status === 'PARTIALLY_COMPLETE') && progress >= 0 && (
-        <ProgressBar progress={progress} label={getProgressLabel()} />
-      )}
-      
-      <div className="relative space-y-6">
-        {/* Ligne de progression en arrière-plan */}
-        <div className="absolute left-4 top-0 h-full w-0.5 bg-cyan-400/20" />
-        
+    <div className="panel animate-rise p-6 sm:p-8">
+      <div className="mb-6 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <span className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-brand/40 bg-brand/10">
+            <span className="absolute inset-0 rounded-xl animate-pulse-ring" />
+            <Icon name="gauge" className="h-5 w-5 text-brand-soft" />
+          </span>
+          <div>
+            <h2 className="text-lg font-bold text-ink">Analysis in progress</h2>
+            <p className="text-xs text-faint">Real-time pipeline processing</p>
+          </div>
+        </div>
+        {claimsCount > 0 && (
+          <div className="flex items-center gap-2 rounded-lg border border-line bg-elevated/50 px-3 py-1.5">
+            <Icon name="sparkle" className="h-4 w-4 text-brand-soft" />
+            <span className="font-mono text-sm text-ink">{claimsCount}</span>
+            <span className="text-xs text-faint">claim{claimsCount > 1 ? 's' : ''}</span>
+          </div>
+        )}
+      </div>
+
+      {showProgressBar && progress >= 0 && <ProgressBar progress={progress} label={getProgressLabel()} />}
+
+      {/* Timeline des étapes */}
+      <ol className="relative space-y-1">
         {steps.map((step, index) => {
-          let visualState = 'pending';
-          if (index < currentStepIndex) {
-            visualState = 'completed';
-          } else if (index === currentStepIndex) {
-            visualState = 'in-progress';
-          }
+          const state = index < currentStepIndex ? 'done' : index === currentStepIndex ? 'active' : 'pending';
+          const isLast = index === steps.length - 1;
 
           return (
-            <div key={step.status} className="flex items-center gap-5 relative pl-2">
-              <div className="flex-shrink-0 z-10">
-                {visualState === 'completed' && <CheckIcon />}
-                {visualState === 'in-progress' && <SpinnerIcon />}
-                {visualState === 'pending' && <DotIcon />}
-              </div>
-              <div className="flex-1">
-                <p className={`text-lg transition-all duration-300 ${
-                  visualState === 'completed' ? 'text-green-400 font-semibold' : ''
-                } ${
-                  visualState === 'in-progress' ? 'text-cyan-300 font-bold scale-105' : ''
-                } ${
-                  visualState === 'pending' ? 'text-gray-500' : ''
-                }`}>
+            <li key={step.status} className="relative flex gap-4 pb-1">
+              {/* Connecteur vertical */}
+              {!isLast && (
+                <span
+                  className={`absolute left-[18px] top-10 h-[calc(100%-1rem)] w-px ${
+                    state === 'done' ? 'bg-brand/50' : 'bg-line'
+                  }`}
+                />
+              )}
+
+              {/* Pastille d'état */}
+              <span className="relative z-10 flex h-9 w-9 shrink-0 items-center justify-center">
+                {state === 'done' && (
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full border border-emerald-400/40 bg-emerald-400/15 text-emerald-300">
+                    <Icon name="check" className="h-5 w-5" strokeWidth={2.6} />
+                  </span>
+                )}
+                {state === 'active' && (
+                  <span className="relative flex h-9 w-9 items-center justify-center rounded-full border border-brand/50 bg-brand/15 text-brand-soft">
+                    <span className="absolute inset-0 rounded-full animate-pulse-ring" />
+                    <Icon name={step.icon} className="h-4 w-4" />
+                  </span>
+                )}
+                {state === 'pending' && (
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-elevated/40 text-faint">
+                    <Icon name={step.icon} className="h-4 w-4" />
+                  </span>
+                )}
+              </span>
+
+              {/* Libellé */}
+              <div className="flex min-h-9 flex-1 flex-col justify-center pb-3">
+                <p
+                  className={`text-[15px] transition-colors ${
+                    state === 'done'
+                      ? 'font-medium text-muted'
+                      : state === 'active'
+                      ? 'font-semibold text-ink'
+                      : 'text-faint'
+                  }`}
+                >
                   {step.label}
                 </p>
-                
-                {/* Affichage du progrès détaillé pour l'étape en cours */}
-                {visualState === 'in-progress' &&
-                 (analysis.status === 'PARTIALLY_COMPLETE' ||
-                  analysis.status === 'EXTRACTING_CLAIMS' ||
-                  analysis.status === 'VALIDATING_CLAIMS' ||
-                  analysis.status === 'FACT_CHECKING') &&
-                 progress > 0 && (
-                  <p className="text-sm text-cyan-400/80 mt-1">
-                    {progress}% terminé
-                    {analysis.claims && analysis.claims.length > 0 && (
-                      analysis.status === 'FACT_CHECKING'
-                        ? ` • ${analysis.claims.filter(c => c.verdict).length}/${analysis.claims.length} affirmation${analysis.claims.length > 1 ? 's' : ''} vérifiée${analysis.claims.length > 1 ? 's' : ''}`
-                        : ` • ${analysis.claims.length} affirmation${analysis.claims.length > 1 ? 's' : ''} trouvée${analysis.claims.length > 1 ? 's' : ''}`
-                    )}
+                {state === 'active' && progress > 0 && showProgressBar && (
+                  <p className="mt-0.5 font-mono text-xs text-brand-soft/80">
+                    {progress}%
+                    {claimsCount > 0 &&
+                      (analysis.status === 'FACT_CHECKING'
+                        ? ` · ${verifiedCount}/${claimsCount} verified`
+                        : ` · ${claimsCount} found`)}
                   </p>
                 )}
               </div>
-            </div>
+            </li>
           );
         })}
-      </div>
-      
+      </ol>
+
       {analysis.status === 'FAILED' && (
-        <p className="mt-6 text-center text-red-400 font-bold text-lg animate-pulse">
-          L'analyse a échoué. Veuillez vérifier l'URL et réessayer.
-          {analysis.errorMessage && (
-            <span className="block text-sm text-red-300 mt-2 font-normal">
-              {analysis.errorMessage}
-            </span>
-          )}
-        </p>
+        <div className="mt-6 flex items-start gap-3 rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 text-rose-200">
+          <Icon name="alert" className="mt-0.5 h-5 w-5 shrink-0 text-rose-300" />
+          <div>
+            <p className="font-semibold text-rose-100">Analysis failed</p>
+            <p className="text-sm text-rose-200/90">
+              {analysis.errorMessage || 'Please check the link and try again.'}
+            </p>
+          </div>
+        </div>
       )}
     </div>
   );

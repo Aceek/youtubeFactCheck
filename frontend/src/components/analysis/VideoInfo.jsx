@@ -1,32 +1,34 @@
-import React from 'react';
+import Icon from '../common/Icon';
 
 function VideoInfo({ video }) {
   if (!video) return null;
 
   return (
-    <div className="bg-black/30 p-6 rounded-xl shadow-2xl border border-cyan-400/20 backdrop-blur-lg flex flex-col md:flex-row gap-6 items-start">
+    <div className="panel flex flex-col gap-5 p-5 md:flex-row md:items-start">
       {video.thumbnailUrl && (
-        <img
-          src={video.thumbnailUrl}
-          alt="Miniature de la vidéo"
-          className="w-full md:w-56 h-auto object-cover rounded-lg shadow-lg border-2 border-cyan-400/30"
-        />
-      )}
-      <div className="flex-1">
-        <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-fuchsia-400 mb-3">
-          {video.title || 'Titre non disponible'}
-        </h2>
-        <p className="text-md text-cyan-200/80 mb-2">
-          Par : <span className="font-semibold text-white">{video.author || 'Auteur non disponible'}</span>
-        </p>
-        <p className="text-md text-cyan-200/80 mb-4">
-          Publiée le : <span className="font-semibold text-white">
-            {video.publishedAt ? new Date(video.publishedAt).toLocaleDateString('fr-FR') : 'Date inconnue'}
-          </span>
-        </p>
-        <div className="max-h-32 overflow-y-auto p-4 bg-gray-900/60 rounded-lg border border-gray-700 text-sm text-gray-300 whitespace-pre-wrap scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
-          {video.description || 'Pas de description.'}
+        <div className="relative w-full shrink-0 overflow-hidden rounded-xl border border-line md:w-64">
+          <img src={video.thumbnailUrl} alt="Content thumbnail" className="h-auto w-full object-cover" />
         </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <h2 className="text-xl font-bold leading-snug text-ink">{video.title || 'Untitled'}</h2>
+
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted">
+          <span className="inline-flex items-center gap-1.5">
+            <Icon name="film" className="h-4 w-4 text-faint" />
+            <span className="font-medium text-ink">{video.author || 'Unknown author'}</span>
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <Icon name="clock" className="h-4 w-4 text-faint" />
+            {video.publishedAt ? new Date(video.publishedAt).toLocaleDateString('en-US') : 'Unknown date'}
+          </span>
+        </div>
+
+        {video.description && (
+          <div className="scrollbar-thin mt-4 max-h-28 overflow-y-auto rounded-lg border border-line bg-base/40 p-3 text-sm leading-relaxed text-muted whitespace-pre-wrap">
+            {video.description}
+          </div>
+        )}
       </div>
     </div>
   );

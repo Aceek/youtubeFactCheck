@@ -1,74 +1,48 @@
-import React from 'react';
 import { useEscapeKey } from '../../hooks/useKeyboard';
+import Icon from './Icon';
 
 function ExpandModal({ isOpen, onClose, children, title, type = 'default' }) {
-  // Fermer le modal avec la touche Échap
   useEscapeKey(() => {
-    if (isOpen) {
-      onClose();
-    }
+    if (isOpen) onClose();
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
-  const getModalStyles = () => {
-    switch (type) {
-      case 'transcript':
-        return {
-          container: 'max-w-5xl h-[85vh]',
-          gradient: 'from-cyan-400 to-blue-300'
-        };
-      case 'claims':
-        return {
-          container: 'max-w-4xl h-[90vh]',
-          gradient: 'from-fuchsia-400 to-cyan-300'
-        };
-      default:
-        return {
-          container: 'max-w-3xl h-[90vh]',
-          gradient: 'from-fuchsia-400 to-cyan-300'
-        };
-    }
+  const sizes = {
+    transcript: 'max-w-5xl h-[85vh]',
+    claims: 'max-w-4xl h-[90vh]',
+    default: 'max-w-3xl h-[90vh]',
   };
-
-  const styles = getModalStyles();
+  const containerSize = sizes[type] || sizes.default;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
-      <div className={`relative bg-gray-900/95 rounded-xl shadow-2xl border-2 border-fuchsia-500/40 w-full ${styles.container} flex flex-col animate-scale-in backdrop-blur-lg`}>
-        {/* Header */}
-        <div className="flex justify-between items-center p-6 border-b border-fuchsia-500/30 bg-black/30 flex-shrink-0">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md animate-fade-in"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className={`panel-raised flex w-full flex-col overflow-hidden animate-scale-in ${containerSize}`}>
+        {/* En-tête */}
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-6 py-4">
           <div className="flex items-center gap-3">
-            <div className="w-2 h-8 bg-gradient-to-b from-fuchsia-500 to-cyan-400 rounded-full"></div>
-            <h2 className={`text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r ${styles.gradient}`}>
-              {title}
-            </h2>
+            <span className="h-6 w-1 rounded-full bg-gradient-to-b from-brand to-live" />
+            <h2 className="text-lg font-bold text-ink">{title}</h2>
           </div>
           <button
             onClick={onClose}
-            className="group p-2 rounded-full bg-red-500/20 hover:bg-red-500/40 border border-red-500/30 hover:border-red-400 transition-all duration-200"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-line text-muted transition-colors hover:border-rose-400/50 hover:bg-rose-500/10 hover:text-rose-300"
             aria-label="Fermer"
           >
-            <svg
-              className="w-6 h-6 text-red-400 group-hover:text-red-300 transition-colors"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <Icon name="close" className="h-5 w-5" />
           </button>
         </div>
 
-        {/* Content - Prend tout l'espace disponible avec sa propre scrollbar */}
-        <div className="flex-1 overflow-hidden">
-          {children}
-        </div>
+        {/* Contenu */}
+        <div className="flex-1 overflow-hidden">{children}</div>
 
-        {/* Footer */}
-        <div className="p-4 border-t border-fuchsia-500/20 bg-black/20 text-center flex-shrink-0">
-          <p className="text-sm text-gray-400">
-            Appuyez sur <kbd className="px-2 py-1 bg-gray-700 rounded text-xs">Échap</kbd> pour fermer
+        {/* Pied */}
+        <div className="shrink-0 border-t border-line px-6 py-3 text-center">
+          <p className="text-xs text-faint">
+            Press <kbd className="rounded border border-line bg-elevated px-1.5 py-0.5 font-mono text-[10px] text-muted">Esc</kbd> to close
           </p>
         </div>
       </div>
