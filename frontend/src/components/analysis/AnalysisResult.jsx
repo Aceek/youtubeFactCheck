@@ -9,7 +9,7 @@ import ExpandedTranscript from './ExpandedTranscript.jsx';
 import ConfidenceGauge from './ConfidenceGauge.jsx';
 import VerdictDistribution from './VerdictDistribution.jsx';
 import Icon from '../common/Icon.jsx';
-import { toPercent } from '../../lib/factCheck.js';
+import { toPercent, computeConfidence } from '../../lib/factCheck.js';
 
 function AnalysisResult({ analysis, currentTime, playerKey, onPlayerReady, onClaimClick, onRerunClaims, onReloadPlayer }) {
   const [showClaimsModal, setShowClaimsModal] = useState(false);
@@ -23,7 +23,11 @@ function AnalysisResult({ analysis, currentTime, playerKey, onPlayerReady, onCla
   const isProcessing = analysis.status !== 'COMPLETE' && analysis.status !== 'FAILED';
 
   const hasVerdicts = claimsAvailable && analysis.claims.some((c) => c.verdict);
-  const hasScore = toPercent(analysis.confidenceScore) !== null;
+  // Le backend ne persiste pas (encore) de score : on retombe sur un calcul
+  // client à partir des verdicts pour que les vraies analyses aient aussi une jauge.
+  const displayScore =
+    analysis.confidenceScore != null ? analysis.confidenceScore : computeConfidence(analysis.claims);
+  const hasScore = toPercent(displayScore) !== null;
   const showSynthesis = claimsAvailable && (hasVerdicts || hasScore);
 
   const validCount = claimsAvailable ? analysis.claims.filter((c) => c.validationStatus === 'VALID').length : 0;
@@ -50,7 +54,7 @@ function AnalysisResult({ analysis, currentTime, playerKey, onPlayerReady, onCla
           <div className="grid items-center gap-6 lg:grid-cols-[auto_1fr]">
             {hasScore && (
               <div className="flex justify-center lg:border-r lg:border-line lg:pr-6">
-                <ConfidenceGauge score={analysis.confidenceScore} />
+                <ConfidenceGauge score={displayScore} />
               </div>
             )}
             <div className="space-y-5">

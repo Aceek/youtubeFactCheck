@@ -2,11 +2,14 @@ import { useState, useEffect } from 'react';
 import AnalysisForm from '../components/analysis/AnalysisForm';
 import AnalysisResult from '../components/analysis/AnalysisResult';
 import AnalysisStatus from '../components/analysis/AnalysisStatus';
+import LiveActivityFeed from '../components/analysis/LiveActivityFeed';
 import Icon from '../components/common/Icon';
 import { useAnalysis } from '../hooks/useAnalysis';
+import { useActivityFeed } from '../hooks/useActivityFeed';
 
 function HomePage() {
   const { analysis, isLoading, error, startAnalysis, rerunClaimExtraction } = useAnalysis();
+  const activityEvents = useActivityFeed(analysis);
   const [player, setPlayer] = useState(null);
   const [playerKey, setPlayerKey] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
@@ -98,11 +101,18 @@ function HomePage() {
       )}
 
       {isAnalysisRunning && (
-        <AnalysisStatus
-          analysis={analysis}
-          withValidation={runValidationOnSubmit}
-          withFactChecking={runFactCheckingOnSubmit}
-        />
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-stretch">
+          <AnalysisStatus
+            analysis={analysis}
+            withValidation={runValidationOnSubmit}
+            withFactChecking={runFactCheckingOnSubmit}
+          />
+          <LiveActivityFeed
+            events={activityEvents}
+            claims={analysis.claims}
+            onSeek={handleClaimClick}
+          />
+        </div>
       )}
 
       {showResults && (

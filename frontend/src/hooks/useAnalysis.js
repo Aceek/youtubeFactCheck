@@ -1,6 +1,10 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { createAnalysis, fetchAnalysis, reRunClaims } from '../api/analysisApi';
 
+// Cadence de polling pendant une analyse active. Rapprochée (2 s) pour que
+// l'UI "live" (pipeline + flux d'activité) se remplisse de façon fluide.
+const POLL_INTERVAL_MS = 2000;
+
 export function useAnalysis() {
   const [analysis, setAnalysis] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -51,7 +55,7 @@ export function useAnalysis() {
 
       pollingIntervalRef.current = setInterval(() => {
         pollAnalysis(initialAnalysis.id);
-      }, 5000);
+      }, POLL_INTERVAL_MS);
 
     } catch (err) {
       setError(err.message);
@@ -76,7 +80,7 @@ export function useAnalysis() {
 
       pollingIntervalRef.current = setInterval(() => {
         pollAnalysis(id);
-      }, 5000);
+      }, POLL_INTERVAL_MS);
     } catch (err) {
       setError(err.message);
     }
