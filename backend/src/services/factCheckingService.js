@@ -305,7 +305,7 @@ async function verifySingleClaim(claim, searchQueries, analysisId) {
 
     console.log(`ℹ️ Aucun fact-check Google trouvé pour claim ${claim.id}, passage à la recherche web`);
 
-    // ÉTAPE 2: Recherche web via Serper
+    // ÉTAPE 2: Recherche web via Brave Search
     console.log(`🔍 Étape 2: Recherche web pour claim ${claim.id}`);
     const searchResults = await webSearchService.searchMultiple(searchQueries);
     
