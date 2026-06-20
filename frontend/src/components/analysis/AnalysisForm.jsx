@@ -72,9 +72,14 @@ function AnalysisForm({ onSubmit, isLoading, runValidation, setRunValidation, ru
               <input
                 id="content-url"
                 type="text"
+                inputMode="url"
                 value={url}
                 onChange={handleUrlChange}
                 placeholder="Paste any link — video, post, article…"
+                spellCheck={false}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
                 className={`field !pl-12 text-base ${formError ? '!border-rose-500/60' : ''}`}
                 required
               />

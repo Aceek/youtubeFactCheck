@@ -109,10 +109,23 @@
   .field {
     @apply w-full rounded-xl border border-line bg-base/60 px-4 py-3 text-ink
       placeholder:text-faint transition-all duration-200;
+    /* Chrome force parfois -webkit-text-fill-color (heuristique autofill/coller),
+       ce qui rend le texte saisi invisible : on le verrouille sur la couleur d'encre. */
+    -webkit-text-fill-color: var(--color-ink);
+    caret-color: var(--color-brand);
   }
   .field:focus {
     @apply outline-none border-brand/70;
     box-shadow: 0 0 0 4px rgba(110, 123, 255, 0.15);
+  }
+  /* Neutralise le style d'autofill Chrome (fond jaune + texte sombre) */
+  .field:-webkit-autofill,
+  .field:-webkit-autofill:hover,
+  .field:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--color-ink);
+    caret-color: var(--color-brand);
+    -webkit-box-shadow: 0 0 0 1000px var(--color-elevated) inset;
+    transition: background-color 9999s ease-in-out 0s;
   }
 
   /* Bouton d'action principal */
