@@ -110,6 +110,39 @@ export function isFactCheckSkipped(claim) {
   return !claim?.verdict && FACTCHECK_SKIP_STATES.includes(claim?.validationStatus);
 }
 
+// Poids de chaque verdict pour le calcul d'un indice de confiance global.
+// UNVERIFIABLE est volontairement exclu (ni à charge ni à décharge).
+const VERDICT_WEIGHTS = { TRUE: 1, MISLEADING: 0.4, FALSE: 0 };
+
+// Calcule un indice de confiance (0–1) à partir des verdicts disponibles.
+// Heuristique côté client : moyenne pondérée des claims effectivement vérifiés.
+// Sert pour la jauge "live" pendant l'analyse ET comme repli dans la synthèse
+// finale (le backend ne persiste pas encore de score). Renvoie null si aucun
+// verdict exploitable n'est encore disponible.
+export function computeConfidence(claims) {
+  if (!Array.isArray(claims)) return null;
+  let sum = 0;
+  let n = 0;
+  for (const claim of claims) {
+    const w = VERDICT_WEIGHTS[claim?.verdict];
+    if (w !== undefined) {
+      sum += w;
+      n += 1;
+    }
+  }
+  return n === 0 ? null : sum / n;
+}
+
+// Compte rendu rapide des claims (pour les compteurs "live").
+export function summarizeClaims(claims) {
+  const list = Array.isArray(claims) ? claims : [];
+  return {
+    total: list.length,
+    validated: list.filter((c) => c.validationStatus === 'VALID').length,
+    verified: list.filter((c) => c.verdict).length,
+  };
+}
+
 export function getSkipReason(status) {
   switch (status) {
     case 'HALLUCINATION':
